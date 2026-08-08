@@ -1,0 +1,71 @@
+{
+  "name": "surea11y",
+  "version": "1.0.0",
+  "description": "Command-line WCAG 2.2 accessibility scanner for static HTML, with baseline gating and HTML/SARIF reports. Powered by @surea11y/core.",
+  "keywords": [
+    "accessibility",
+    "a11y",
+    "wcag",
+    "wcag2",
+    "wcag21",
+    "wcag22",
+    "accessibility-testing",
+    "a11y-testing",
+    "cli",
+    "command-line",
+    "audit",
+    "aria",
+    "contrast",
+    "sarif",
+    "baseline",
+    "ci",
+    "jsdom"
+  ],
+  "type": "commonjs",
+  "bin": {
+    "surea11y": "bin/surea11y.js"
+  },
+  "author": "Jorge Rumoroso",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SureA11y/cli.git"
+  },
+  "homepage": "https://github.com/SureA11y/cli#readme",
+  "bugs": {
+    "url": "https://github.com/SureA11y/cli/issues"
+  },
+  "engines": {
+    "node": "^20.19.0 || ^22.13.0 || >=24.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "bin/surea11y.js",
+    "docs/**/*.md",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "scripts": {
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write \"bin/**/*.js\" \"scripts/**/*.js\" \"tests/**/*.js\" \"eslint.config.js\"",
+    "format:check": "prettier --check \"bin/**/*.js\" \"scripts/**/*.js\" \"tests/**/*.js\" \"eslint.config.js\"",
+    "test": "npm run format:check && node scripts/run-tests.js",
+    "test:coverage": "node scripts/run-tests.js --experimental-test-coverage --test-coverage-include=bin/**/*.js",
+    "prepublishOnly": "npm run lint && npm test"
+  },
+  "dependencies": {
+    "@surea11y/core": "^1.4.0",
+    "jsdom": "^29.1.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.8.0",
+    "eslint-config-prettier": "^10.1.8",
+    "globals": "^17.8.0",
+    "prettier": "^3.9.6"
+  }
+}

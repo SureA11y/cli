@@ -1,0 +1,78 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          registry-url: https://registry.npmjs.org
+          cache: npm
+      - run: npm install -g npm@latest
+      - run: npm ci
+
+      - name: Verify tag matches package version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          PKG="$(node -p "require('./package.json').version")"
+          if [ "$TAG" != "$PKG" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match package.json version $PKG"
+            exit 1
+          fi
+
+      # The engine ships from a different repo, so a CLI tag can front-run it.
+      - name: Verify the declared @surea11y/core range resolves on the registry
+        run: |
+          RANGE="$(node -p "require('./package.json').dependencies['@surea11y/core']")"
+          if ! npm view "@surea11y/core@$RANGE" version >/dev/null 2>&1; then
+            echo "::error::@surea11y/core@$RANGE does not resolve on npm — publish the engine first"
+            exit 1
+          fi
+          echo "resolves to: $(npm view "@surea11y/core@$RANGE" version | tail -1)"
+
+      - run: npm run lint
+      - run: npm run format:check
+      - run: npm test
+
+      # The classic publish bug for a CLI is a `files` allowlist that omits
+      # something the binary requires at runtime -- invisible to tests, which
+      # run against the working tree. Install the actual tarball and run it.
+      - name: Smoke-test the packed tarball
+        run: |
+          set -euo pipefail
+          TARBALL="$(npm pack --pack-destination "$RUNNER_TEMP" | tail -1)"
+          WORKDIR="$(mktemp -d)"
+          cd "$WORKDIR"
+          npm init -y >/dev/null
+          npm install "$RUNNER_TEMP/$TARBALL" >/dev/null
+          printf '%s' '<!doctype html><html lang="en"><head><title>T</title></head><body><main><img src="a.png"></main></body></html>' > page.html
+          ./node_modules/.bin/surea11y --version
+          set +e
+          ./node_modules/.bin/surea11y scan ./page.html --rules img-alt-present
+          STATUS=$?
+          set -e
+          if [ "$STATUS" -ne 1 ]; then
+            echo "::error::packed CLI exited $STATUS on a page with a known violation (expected 1)"
+            exit 1
+          fi
+
+      - name: Publish to npm with provenance
+        if: startsWith(github.ref, 'refs/tags/')
+        run: npm publish --provenance
+
+      - name: Manual run summary
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        run: echo "Checks passed. Publishing skipped because this was not a tag."
