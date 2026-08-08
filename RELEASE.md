@@ -46,7 +46,7 @@ For 1.0.0 that means `@surea11y/core@1.4.0` publishes first. The release workflo
 7. **Verify the published package** by installing it the way a user would, from a clean directory:
 
    ```sh
-   cd "$(mktemp -d)" && npm init -y >/dev/null && npm install surea11y
+   cd "$(mktemp -d)" && npm init -y >/dev/null && npm install @surea11y/cli
    ./node_modules/.bin/surea11y --version
    ```
 

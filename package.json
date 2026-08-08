@@ -1,25 +1,23 @@
 {
-  "name": "surea11y",
+  "name": "@surea11y/cli",
   "version": "1.0.0",
   "description": "Command-line WCAG 2.2 accessibility scanner for static HTML, with baseline gating and HTML/SARIF reports. Powered by @surea11y/core.",
   "keywords": [
     "accessibility",
     "a11y",
     "wcag",
-    "wcag2",
     "wcag21",
     "wcag22",
     "accessibility-testing",
     "a11y-testing",
-    "cli",
-    "command-line",
     "audit",
     "aria",
     "contrast",
     "sarif",
-    "baseline",
-    "ci",
-    "jsdom"
+    "jsdom",
+    "cli",
+    "command-line",
+    "baseline"
   ],
   "type": "commonjs",
   "bin": {

@@ -6,13 +6,13 @@ All notable changes to this package are documented here. This project adheres to
 
 Initial release as a standalone package.
 
-The CLI previously shipped inside `@surea11y/core` as `bin/core.js`. It now lives in its own package, `surea11y`, so that `@surea11y/core` can ship with **zero runtime dependencies** — `jsdom` was only ever needed to parse HTML for the CLI, never by the engine itself. Using the library directly against a DOM you already have no longer pulls `jsdom` into your tree.
+The CLI previously shipped inside `@surea11y/core` as `bin/core.js`. It now lives in its own package, `@surea11y/cli`, so that `@surea11y/core` can ship with **zero runtime dependencies** — `jsdom` was only ever needed to parse HTML for the CLI, never by the engine itself. Using the library directly against a DOM you already have no longer pulls `jsdom` into your tree.
 
 ### For existing `@surea11y/core` CLI users
 
-- Install `surea11y` instead of relying on `@surea11y/core`'s bin:
+- Install `@surea11y/cli` instead of relying on `@surea11y/core`'s bin. The command itself is still `surea11y`:
   ```sh
-  npx surea11y scan ./index.html     # was: npx @surea11y/core scan ./index.html
+  npx @surea11y/cli scan ./index.html     # was: npx @surea11y/core scan ./index.html
   ```
 - Every flag, output format, and exit code is unchanged. `--json`, `--locale`, `--rules`, `--exclude-rules`, `--tags`, `--context`, `--custom-rules`, `--write-baseline`, `--baseline`, `--html`, `--sarif` all behave exactly as before, and existing baseline files remain valid.
 - SARIF output now reports the CLI's own version in `runs[].tool.driver.version`, and `informationUri` points at this repository rather than the engine's.

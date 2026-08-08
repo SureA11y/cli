@@ -2,7 +2,7 @@
 
 ## Scope
 
-`surea11y` is a command-line wrapper around the [`@surea11y/core`](https://github.com/SureA11y/core) engine. The engine itself reads a DOM and returns structured findings — see [its security policy](https://github.com/SureA11y/core/blob/main/SECURITY.md) for that half. This package adds the parts an engine deliberately doesn't have: file I/O, network access, and a plugin loader. Those are what's worth a security-conscious look here.
+`@surea11y/cli` provides the `surea11y` command, a wrapper around the [`@surea11y/core`](https://github.com/SureA11y/core) engine. The engine itself reads a DOM and returns structured findings — see [its security policy](https://github.com/SureA11y/core/blob/main/SECURITY.md) for that half. This package adds the parts an engine deliberately doesn't have: file I/O, network access, and a plugin loader. Those are what's worth a security-conscious look here.
 
 - **Fetching a URL.** `surea11y scan <url>` issues a plain HTTP(S) GET and reads the response body. It follows whatever redirects the platform `fetch` follows, and sends no credentials, cookies, or custom headers. Point it at an internal URL and it will reach that host from wherever you run it — the usual SSRF caveat applies if you ever wire the target argument up to untrusted input.
 

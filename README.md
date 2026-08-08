@@ -1,17 +1,17 @@
-# surea11y
+# @surea11y/cli
 
 Command-line WCAG 2.2 accessibility scanner for static HTML — baseline gating, HTML and SARIF reports, custom rules. Powered by [`@surea11y/core`](https://github.com/SureA11y/core), the deterministic engine that tells you what it *can't* tell you.
 
 ```sh
-npx surea11y scan ./index.html
-npx surea11y scan https://example.com/ --tags wcag2a,wcag2aa
+npx @surea11y/cli scan ./index.html
+npx @surea11y/cli scan https://example.com/ --tags wcag2a,wcag2aa
 ```
 
 ## Install
 
 ```sh
-npm install -g surea11y          # globally
-npm install --save-dev surea11y  # or per-project, for CI
+npm install -g @surea11y/cli          # globally
+npm install --save-dev @surea11y/cli  # or per-project, for CI
 ```
 
 Requires Node.js `^20.19.0 || ^22.13.0 || >=24.0.0`.
@@ -77,7 +77,7 @@ Full flag reference, custom-rule contract, and CI recipes: [`docs/CLI.md`](./doc
 
 ## CLI vs. library
 
-Install **`surea11y`** (this package) when you want the command. It depends on `jsdom` to turn HTML into a DOM, and on `@surea11y/core` for the rules.
+Install **`@surea11y/cli`** (this package) when you want the `surea11y` command. It depends on `jsdom` to turn HTML into a DOM, and on `@surea11y/core` for the rules.
 
 Install **[`@surea11y/core`](https://github.com/SureA11y/core)** when you want the API. It has **zero runtime dependencies** and evaluates whatever DOM you hand it — so if you already have a browser or a jsdom instance, you don't pay for `jsdom` twice. Splitting the CLI out of the engine is what keeps that promise true.
 

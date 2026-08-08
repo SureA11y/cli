@@ -383,7 +383,7 @@ async function runScan(args) {
     ({ JSDOM } = require('jsdom'));
   } catch {
     process.stderr.write(
-      'Error: the surea11y CLI requires jsdom. It is a dependency of this package, so a missing jsdom means a broken install — try reinstalling with `npm install -g surea11y` (or `npm install` in your project).\n'
+      'Error: the surea11y CLI requires jsdom. It is a dependency of this package, so a missing jsdom means a broken install — try reinstalling with `npm install -g @surea11y/cli` (or `npm install` in your project).\n'
     );
     process.exitCode = 2;
     return;

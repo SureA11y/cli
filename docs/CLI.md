@@ -1,17 +1,17 @@
 # CLI
 
-`surea11y` is a small command-line scanner (`bin/surea11y.js`) for ad hoc scans and CI, on top of the [`@surea11y/core`](https://github.com/SureA11y/core) library API described in [`INTEGRATION.md`](https://github.com/SureA11y/core/blob/main/docs/INTEGRATION.md).
+`@surea11y/cli` provides `surea11y`, a small command-line scanner (`bin/surea11y.js`) for ad hoc scans and CI, on top of the [`@surea11y/core`](https://github.com/SureA11y/core) library API described in [`INTEGRATION.md`](https://github.com/SureA11y/core/blob/main/docs/INTEGRATION.md).
 
 ```sh
-npx surea11y scan ./index.html
-npx surea11y scan https://example.com/
+npx @surea11y/cli scan ./index.html
+npx @surea11y/cli scan https://example.com/
 ```
 
 Or install it once:
 
 ```sh
-npm install -g surea11y          # globally
-npm install --save-dev surea11y  # or per-project, for CI
+npm install -g @surea11y/cli          # globally
+npm install --save-dev @surea11y/cli  # or per-project, for CI
 ```
 
 ## What it can and can't scan
@@ -125,11 +125,11 @@ Works alongside any other output mode, and alongside `--baseline` (already-known
 ## In CI
 
 ```sh
-npx surea11y scan ./dist/index.html || exit 1
+npx @surea11y/cli scan ./dist/index.html || exit 1
 ```
 
 Or, since the exit code already reflects pass/fail, just let the command's own exit code propagate — most CI systems fail the step automatically on a non-zero exit. See [`CI_INTEGRATIONS.md`](https://github.com/SureA11y/core/blob/main/docs/CI_INTEGRATIONS.md) for ready-to-paste GitHub Actions and Bitbucket Pipelines templates, including a SARIF-upload example.
 
 ## A note on dependencies
 
-This CLI depends on `jsdom` (to parse fetched/read HTML into a DOM) and on `@surea11y/core` (the engine). That split is the whole point of shipping the CLI separately: `@surea11y/core` itself has **zero runtime dependencies**, so using the library directly against a DOM you already have — jsdom, a real browser, Playwright, whatever — never pulls in `jsdom` a second time. Install `surea11y` when you want the command; install `@surea11y/core` when you want the API.
+This CLI depends on `jsdom` (to parse fetched/read HTML into a DOM) and on `@surea11y/core` (the engine). That split is the whole point of shipping the CLI separately: `@surea11y/core` itself has **zero runtime dependencies**, so using the library directly against a DOM you already have — jsdom, a real browser, Playwright, whatever — never pulls in `jsdom` a second time. Install `@surea11y/cli` when you want the command; install `@surea11y/core` when you want the API.
