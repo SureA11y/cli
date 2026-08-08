@@ -120,17 +120,45 @@ That second case is why "use the CLI for pipelines" is a misleading shorthand �
 
 Either way you're running the same engine. [`@surea11y/core`](https://github.com/SureA11y/core) has **zero runtime dependencies** and evaluates whatever DOM you hand it, so if you already have a browser or a jsdom instance, you don't pay for `jsdom` twice. This package is the one that brings `jsdom` along, because turning fetched HTML into a DOM is what a CLI has to do. Splitting the two is what keeps that promise true.
 
+## Part of the SureA11y family
+
+One engine, several front ends. If the dividing line above pointed you away from
+the CLI, install the one matching your setup instead — each pulls in
+`@surea11y/core` for you.
+
+| Your setup | Install |
+|---|---|
+| **Playwright** | [`@surea11y/playwright`](https://github.com/SureA11y/playwright#readme) |
+| **Puppeteer** | [`@surea11y/puppeteer`](https://github.com/SureA11y/puppeteer#readme) |
+| **Selenium** | [`@surea11y/selenium`](https://github.com/SureA11y/selenium#readme) |
+| **Cypress** | [`@surea11y/cypress`](https://github.com/SureA11y/cypress#readme) |
+| **WebdriverIO** | [`@surea11y/webdriverio`](https://github.com/SureA11y/webdriverio#readme) |
+| **Jest** or **Vitest** component tests | [`@surea11y/test-matchers`](https://github.com/SureA11y/test-matchers#readme) |
+| Your own script, against a DOM you already have | [`@surea11y/core`](https://github.com/SureA11y/core#readme) |
+
 ## Local development
 
-`@surea11y/core` 1.4.0 is not on the registry yet, so install it from a locally packed tarball. `package.json` keeps declaring `^1.4.0` — never commit a `file:` dependency.
-
 ```sh
-(cd ../core && npm pack --pack-destination /tmp)
-npm install /tmp/surea11y-core-1.4.0.tgz --no-save --no-package-lock
+npm install
 npm test
 ```
 
-Once core 1.4.0 publishes, a plain `npm install` is enough. See [`RELEASE.md`](./RELEASE.md) for the publish checklist and the cross-repo ordering constraint.
+To run against a local, unpublished `@surea11y/core` — when you're changing the
+engine and the CLI together — pack it and install it without saving, so
+`package.json` keeps declaring its normal semver range:
+
+```sh
+(cd ../core && npm pack --pack-destination /tmp)
+npm install /tmp/surea11y-core-<version>.tgz --no-save --no-package-lock
+npm test
+```
+
+Never commit a `file:` dependency. Note that `npm link` is not a substitute
+here: it exposes the whole working directory and so ignores core's `files`
+allowlist, which can resolve paths that won't exist in the published package.
+
+See [`RELEASE.md`](./RELEASE.md) for the publish checklist and the cross-repo
+ordering constraint.
 
 ## License
 
