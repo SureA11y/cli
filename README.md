@@ -75,11 +75,50 @@ surea11y scan ./dist/index.html --custom-rules ./a11y-rules.js
 
 Full flag reference, custom-rule contract, and CI recipes: [`docs/CLI.md`](./docs/CLI.md).
 
-## CLI vs. library
+## Do you need this package?
 
-Install **`@surea11y/cli`** (this package) when you want the `surea11y` command. It depends on `jsdom` to turn HTML into a DOM, and on `@surea11y/core` for the rules.
+You need it when you want **a command instead of code**. Two examples.
 
-Install **[`@surea11y/core`](https://github.com/SureA11y/core)** when you want the API. It has **zero runtime dependencies** and evaluates whatever DOM you hand it — so if you already have a browser or a jsdom instance, you don't pay for `jsdom` twice. Splitting the CLI out of the engine is what keeps that promise true.
+### You want the CLI
+
+A marketing site built to static HTML. The CI step is one shell line; there's no test file anywhere.
+
+```yaml
+# .github/workflows/a11y.yml
+- run: npm run build
+- run: npx @surea11y/cli scan ./dist/index.html --tags wcag2a,wcag2aa
+```
+
+The scan exits `1` if anything fails, which fails the step. You wrote no JavaScript, so you needed the command.
+
+### You don't
+
+A dashboard whose chart only exists after you click "Load report". You're already writing a Playwright test, so call the engine directly:
+
+```js
+const { A11yCoreBuilder } = require('@surea11y/playwright');
+
+test('dashboard is accessible after loading', async ({ page }) => {
+  await page.goto('/dashboard');
+  await page.getByRole('button', { name: 'Load report' }).click();
+
+  const results = await new A11yCoreBuilder({ page }).analyze();
+  expect(results.checksResults.filter((r) => r.outcome === 'fail')).toEqual([]);
+});
+```
+
+No `@surea11y/cli` here. This is also CI — but the CLI would be *useless* for it, because it never executes page JavaScript. Point `surea11y scan` at that URL and it sees the page before the click ever happens: no chart, nothing to check.
+
+### The dividing line
+
+It isn't local vs. CI — both examples are CI. It's:
+
+- **Is what you want to scan present in the HTML the server sends?** The CLI works, and it's the cheap path: no browser to launch.
+- **Does it only appear after JavaScript runs?** You need a real browser, so you need the library or a binding, and the CLI can't help.
+
+That second case is why "use the CLI for pipelines" is a misleading shorthand — plenty of pipelines are the second example.
+
+Either way you're running the same engine. [`@surea11y/core`](https://github.com/SureA11y/core) has **zero runtime dependencies** and evaluates whatever DOM you hand it, so if you already have a browser or a jsdom instance, you don't pay for `jsdom` twice. This package is the one that brings `jsdom` along, because turning fetched HTML into a DOM is what a CLI has to do. Splitting the two is what keeps that promise true.
 
 ## Local development
 
