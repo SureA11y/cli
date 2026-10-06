@@ -690,3 +690,124 @@ test('CLI: --custom-rules whose module itself throws on require exits 2 with a c
   assert.match(stderr, /Could not load custom rules file/);
   assert.match(stderr, /boom during require/);
 });
+
+function writeSimplePage(name) {
+  const file = path.join(tmpDir, name);
+  fs.writeFileSync(
+    file,
+    '<!doctype html><html lang="en"><head><title>T</title></head><body><main><img src="x.png"></main></body></html>'
+  );
+  return file;
+}
+
+test('CLI: --help names the installed engine release', () => {
+  const corePkg = require('@surea11y/core/package.json');
+  const { stdout, status } = run(['--help']);
+  assert.equal(status, 0);
+  assert.match(
+    stdout.split('\n')[0],
+    new RegExp(`@surea11y/core v${corePkg.version.replace(/\./g, '\\.')}`)
+  );
+});
+
+test('CLI: the summary and --json name the engine release that produced the result', () => {
+  const corePkg = require('@surea11y/core/package.json');
+  const file = writeSimplePage('engine-version.html');
+
+  const summary = run(['scan', file]);
+  assert.match(
+    summary.stdout,
+    new RegExp(`engine: @surea11y/core ${corePkg.version.replace(/\./g, '\\.')}`)
+  );
+
+  const json = run(['scan', file, '--json']);
+  assert.equal(JSON.parse(json.stdout).engine.version, corePkg.version);
+});
+
+test('CLI: --rules naming no known rule exits 2 instead of running nothing', () => {
+  const file = writeSimplePage('run-only-rules.html');
+  const { status, stdout, stderr } = run(['scan', file, '--rules', 'img-alt-presnet']);
+  assert.equal(status, 2);
+  assert.equal(stdout, '');
+  assert.match(stderr, /Error: --rules: no rule named "img-alt-presnet"\. No rule ran\./);
+});
+
+test('CLI: --tags naming no known tag exits 2 instead of running nothing', () => {
+  const file = writeSimplePage('run-only-tags.html');
+  const { status, stderr } = run(['scan', file, '--tags', 'wcag2.2aa']);
+  assert.equal(status, 2);
+  assert.match(stderr, /Error: --tags: no tag named "wcag2\.2aa"\. No rule ran\./);
+});
+
+test('CLI: --rules with one unknown id beside a known one still scans, with a warning', () => {
+  const file = writeSimplePage('run-only-partial.html');
+  const { status, stdout, stderr } = run([
+    'scan',
+    file,
+    '--rules',
+    'img-alt-present,img-alt-presnet',
+    '--json'
+  ]);
+  assert.equal(status, 1);
+  assert.match(stderr, /img-alt-presnet/);
+  assert.deepEqual(
+    JSON.parse(stdout).checksResults.map((r) => r.ruleId),
+    ['img-alt-present']
+  );
+});
+
+test('CLI: --context matching no element exits 2 rather than reporting a clean scan', () => {
+  const file = writeSimplePage('context-unmatched.html');
+  const html = path.join(tmpDir, 'context-unmatched-report.html');
+  const { status, stdout, stderr } = run([
+    'scan',
+    file,
+    '--context',
+    '#no-such-scope',
+    '--json',
+    '--html',
+    html
+  ]);
+  assert.equal(status, 2);
+  assert.equal(stdout, '');
+  assert.match(
+    stderr,
+    /Error: --context "#no-such-scope" matched no element, so nothing was scanned/
+  );
+  assert.equal(fs.existsSync(html), false);
+});
+
+test('CLI: --context matching an element scans only that subtree', () => {
+  const file = writeSimplePage('context-matched.html');
+  const { status, stdout } = run(['scan', file, '--context', 'main', '--json']);
+  assert.equal(status, 1);
+  assert.deepEqual(JSON.parse(stdout).contextMatch, { elementCount: 1, unmatchedSelectors: [] });
+});
+
+test('CLI: --context with an invalid selector exits 2 naming the flag', () => {
+  const file = writeSimplePage('context-invalid.html');
+  const { status, stderr } = run(['scan', file, '--context', '[[']);
+  assert.equal(status, 2);
+  assert.match(stderr, /Error: --context: "\[\[" is not a valid CSS selector/);
+});
+
+test('CLI: --custom-rules that the engine skips exit 2 and name each rule and why', () => {
+  const file = writeSimplePage('custom-rules-skipped.html');
+  const rulesFile = path.join(tmpDir, 'custom-rules-skipped.js');
+  fs.writeFileSync(
+    rulesFile,
+    `const run = (ctx) => ({ ruleId: ctx.rule.ruleId, outcome: 'pass', occurrences: [] });
+    module.exports = [
+      { id: 'org-twice', runInPage: run },
+      { id: 'org-twice', runInPage: run },
+      { id: 'org-bad-meta', meta: { deprecated: true }, runInPage: run }
+    ];`
+  );
+
+  const { status, stdout, stderr } = run(['scan', file, '--custom-rules', rulesFile, '--json']);
+  assert.equal(status, 2);
+  assert.equal(stdout, '');
+  assert.match(stderr, /Error: 2 custom rule\(s\) from --custom-rules did not run:/);
+  assert.match(stderr, /- "org-twice": another custom rule already has this id/);
+  assert.match(stderr, /- "org-bad-meta": invalid meta/);
+});
