@@ -32,8 +32,20 @@ process.stdout.on('error', (err) => {
   throw err;
 });
 
+// The engine's own package.json is a supported export, and reading it doesn't
+// load the rule catalog, so --help can name the engine release cheaply.
+function getCoreVersion() {
+  try {
+    return require('@surea11y/core/package.json').version || null;
+  } catch {
+    return null;
+  }
+}
+
 function printHelp() {
-  process.stdout.write(`surea11y v${pkg.version}
+  const coreVersion = getCoreVersion();
+  process.stdout
+    .write(`surea11y v${pkg.version}${coreVersion ? ` (@surea11y/core v${coreVersion})` : ''}
 
 Usage:
   surea11y scan <file-or-url> [options]
@@ -56,7 +68,9 @@ Options:
 Exit codes:
   0  scan completed, no "fail" outcomes (or no *new* ones, with --baseline)
   1  scan completed, at least one "fail" outcome (or *new* one, with --baseline)
-  2  usage error or the scan itself could not run (bad path/URL, network failure, etc.)
+  2  usage error or the scan itself could not run (bad path/URL, network failure,
+     a --rules/--tags list naming no rule or tag, a --context selector that is
+     invalid or matches nothing, a custom rule the engine could not run, etc.)
 
 Examples:
   surea11y scan ./index.html
@@ -204,6 +218,41 @@ function loadCustomRulesFile(customRulesPath) {
   return descriptors;
 }
 
+// The engine throws with a `code` when an option can't mean what was asked:
+// a --rules or --tags list that names no rule or tag (INVALID_RUN_ONLY), or a
+// --context selector the DOM can't parse (INVALID_CONTEXT_SELECTOR). Its
+// messages name the engine option; name the flag the user typed instead.
+function describeEngineError(err) {
+  const message = formatError(err);
+  if (err && err.code === 'INVALID_RUN_ONLY') {
+    return `${message
+      .replace(/^engineOptions\.rules\.include\b/, '--rules')
+      .replace(/^engineOptions\.tags\.include\b/, '--tags')} No rule ran.`;
+  }
+  if (err && err.code === 'INVALID_CONTEXT_SELECTOR') {
+    return message.replace(/^contextSelector\b/, '--context');
+  }
+  return message;
+}
+
+// A scan can complete without having checked what was asked for. Both cases
+// below would otherwise look like a clean result and pass a CI gate, so they
+// are errors (exit 2), like a custom rules file that fails validation.
+function findScanProblem(result, args) {
+  const contextMatch = result && result.contextMatch;
+  if (args.context && contextMatch && contextMatch.elementCount === 0) {
+    return `--context "${args.context}" matched no element, so nothing was scanned. Check the selector against the page.`;
+  }
+
+  const skipped = (result && result.skippedCustomRules) || [];
+  if (skipped.length) {
+    const lines = skipped.map((s) => `  - ${s.id ? `"${s.id}"` : '(no id)'}: ${s.reason}`);
+    return `${skipped.length} custom rule(s) from --custom-rules did not run:\n${lines.join('\n')}\nSee docs/CLI.md#custom-rules.`;
+  }
+
+  return null;
+}
+
 function printSummary(result, baselineMatch) {
   function getOccurrenceOutcome(ruleResult, occurrence) {
     const occurrenceOutcome =
@@ -236,6 +285,9 @@ function printSummary(result, baselineMatch) {
   }
 
   process.stdout.write(`\nsurea11y scan: ${result.url || '(no url)'}\n`);
+  if (result.engine && result.engine.version) {
+    process.stdout.write(`  engine: @surea11y/core ${result.engine.version}\n`);
+  }
   process.stdout.write(
     `  pass: ${byOutcome.pass}   fail: ${byOutcome.fail}   cantTell: ${byOutcome.cantTell}   notApplicable: ${byOutcome.notApplicable}\n\n`
   );
@@ -404,8 +456,19 @@ async function runScan(args) {
       buildEngineOptions(args, customRules),
       null
     );
+  } catch (err) {
+    process.stderr.write(`Error: ${describeEngineError(err)}\n`);
+    process.exitCode = 2;
+    return;
   } finally {
     dom.window.close();
+  }
+
+  const scanProblem = findScanProblem(result, args);
+  if (scanProblem) {
+    process.stderr.write(`Error: ${scanProblem}\n`);
+    process.exitCode = 2;
+    return;
   }
 
   if (args.html) {
