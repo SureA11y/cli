@@ -22,6 +22,7 @@ Requires Node.js `^20.19.0 || ^22.13.0 || >=24.0.0`.
 $ surea11y scan ./index.html
 
 surea11y scan: file:///path/to/index.html
+  engine: @surea11y/core 1.10.0
   pass: 6   fail: 3   cantTell: 4   notApplicable: 112
 
   occurrences by tier: fail: 3   cantTell: 5
@@ -45,7 +46,7 @@ manual-review, page-title-patterns
 
 That last line is the point of the engine: rules that *cannot* be settled from static markup are reported as `cantTell` and routed to a human, instead of being silently dropped or guessed at. `cantTell` never affects the exit code.
 
-Exit code `0` = clean, `1` = at least one `fail` (the CI-gating case), `2` = usage error or the scan couldn't run.
+Exit code `0` = clean, `1` = at least one `fail` (the CI-gating case), `2` = usage error or the scan couldn't run, including a scan that would have checked nothing (a `--rules`/`--tags` typo, a `--context` selector that matches nothing).
 
 ## What it can and can't scan
 

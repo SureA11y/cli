@@ -2,6 +2,26 @@
 
 All notable changes to this package are documented here. This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Added
+
+- `--junit <path>` writes a JUnit XML report, for the test views of GitLab, Azure DevOps, Jenkins and CircleCI, from the same scan as the other outputs. With `--baseline`, failures already recorded in the baseline are reported as skipped tests. It never changes the exit code. See [`docs/CLI.md`](./docs/CLI.md#junit-report).
+- `--help` and the scan summary name the `@surea11y/core` release that ran the scan. `--version` still prints only the CLI's version.
+
+### Changed
+
+- A scan that would check nothing, or less than asked, exits `2` instead of passing:
+  - a `--rules` or `--tags` list in which nothing names a known rule or tag (such a list used to select no rule, and the run exited `0`);
+  - a `--context` selector that matches no element (the engine used to scan the whole page instead) or isn't valid CSS;
+  - a `--custom-rules` rule the engine skips, such as one whose `id` another custom rule already has or whose `meta` fails validation (it used to be dropped with only a warning).
+
+  The error names the flag, and no report or baseline is written.
+
+### Requires
+
+- `@surea11y/core` `^1.10.0` (was `^1.4.0`): the checks above rely on what 1.10.0 reports.
+
 ## 1.0.0
 
 Initial release as a standalone package.
