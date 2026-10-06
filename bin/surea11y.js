@@ -23,6 +23,7 @@ const pkg = require('../package.json');
 const { buildBaselineEntries, matchBaseline } = require('@surea11y/core/baseline');
 const { renderHtmlReport } = require('@surea11y/core/report');
 const { renderSarifReport } = require('@surea11y/core/sarif');
+const { renderJunitReport } = require('@surea11y/core/junit');
 
 // Piping output to `head`/`less`/etc. closes stdout early — without this,
 // the next write throws an unhandled EPIPE and crashes with a raw stack
@@ -62,6 +63,7 @@ Options:
   --baseline <path>       Gate only on occurrences not already recorded in <path>
   --html <path>           Write a self-contained, browsable HTML report to <path>
   --sarif <path>          Write a SARIF 2.1.0 report to <path> (for GitHub Code Scanning etc.)
+  --junit <path>          Write a JUnit XML report to <path> (for GitLab, Azure DevOps, Jenkins, CircleCI)
   -h, --help              Show this help
   -v, --version           Show the installed version
 
@@ -80,9 +82,10 @@ Examples:
   surea11y scan ./index.html --baseline baseline.json
   surea11y scan ./index.html --html report.html
   surea11y scan ./index.html --baseline baseline.json --sarif results.sarif
+  surea11y scan ./index.html --junit a11y.junit.xml
   surea11y scan ./index.html --custom-rules ./a11y-rules.js
 
-See docs/CLI.md for the full reference (baseline/allowlist, HTML report, SARIF report, custom rules):
+See docs/CLI.md for the full reference (baseline/allowlist, HTML, SARIF and JUnit reports, custom rules):
 https://github.com/SureA11y/cli/blob/main/docs/CLI.md
 `);
 }
@@ -124,6 +127,9 @@ function parseArgs(argv) {
         break;
       case '--sarif':
         out.sarif = argv[++i];
+        break;
+      case '--junit':
+        out.junit = argv[++i];
         break;
       case '-h':
       case '--help':
@@ -489,6 +495,16 @@ async function runScan(args) {
       })
     );
     process.stderr.write(`Wrote SARIF report to: ${args.sarif}\n`);
+  }
+
+  if (args.junit) {
+    fs.writeFileSync(
+      args.junit,
+      renderJunitReport(result, {
+        baselineEntries: baselineFile ? baselineFile.entries : undefined
+      })
+    );
+    process.stderr.write(`Wrote JUnit report to: ${args.junit}\n`);
   }
 
   if (args.writeBaseline) {

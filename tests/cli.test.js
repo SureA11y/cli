@@ -811,3 +811,48 @@ test('CLI: --custom-rules that the engine skips exit 2 and name each rule and wh
   assert.match(stderr, /- "org-twice": another custom rule already has this id/);
   assert.match(stderr, /- "org-bad-meta": invalid meta/);
 });
+
+test('CLI: --junit writes a JUnit XML report with a failing testcase per failing rule', () => {
+  const file = writeSimplePage('junit-source.html');
+  const junitPath = path.join(tmpDir, 'junit-output.xml');
+
+  const { status, stderr } = run([
+    'scan',
+    file,
+    '--rules',
+    'img-alt-present',
+    '--junit',
+    junitPath
+  ]);
+  assert.equal(status, 1); // --junit doesn't change gating: the scan still has a real fail
+  assert.match(stderr, /Wrote JUnit report to/);
+
+  const xml = fs.readFileSync(junitPath, 'utf8');
+  assert.match(xml, /^<\?xml version="1\.0" encoding="UTF-8"\?>/);
+  assert.match(xml, /<testsuites name="surea11y" tests="1" failures="1"/);
+  assert.match(xml, /<testcase classname="wcag-1\.1\.1" name="img-alt-present"/);
+  assert.match(xml, /<failure type="fail"/);
+});
+
+test('CLI: --junit combined with --baseline reports known failures as skipped, not failing', () => {
+  const file = writeSimplePage('junit-baseline.html');
+  const baselinePath = path.join(tmpDir, 'junit-baseline.json');
+  const junitPath = path.join(tmpDir, 'junit-baseline.xml');
+
+  run(['scan', file, '--rules', 'img-alt-present', '--write-baseline', baselinePath]);
+  const { status } = run([
+    'scan',
+    file,
+    '--rules',
+    'img-alt-present',
+    '--baseline',
+    baselinePath,
+    '--junit',
+    junitPath
+  ]);
+  assert.equal(status, 0);
+
+  const xml = fs.readFileSync(junitPath, 'utf8');
+  assert.match(xml, /failures="0"/);
+  assert.match(xml, /<skipped message="1 known failure/);
+});

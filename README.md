@@ -1,6 +1,6 @@
 # @surea11y/cli
 
-Command-line WCAG 2.2 accessibility scanner for static HTML — baseline gating, HTML and SARIF reports, custom rules. Powered by [`@surea11y/core`](https://github.com/SureA11y/core), the deterministic engine that tells you what it *can't* tell you.
+Command-line WCAG 2.2 accessibility scanner for static HTML — baseline gating, HTML, SARIF and JUnit reports, custom rules. Powered by [`@surea11y/core`](https://github.com/SureA11y/core), the deterministic engine that tells you what it *can't* tell you.
 
 ```sh
 npx @surea11y/cli scan ./index.html
@@ -68,6 +68,9 @@ surea11y scan ./dist/index.html --baseline baseline.json         # in CI, from t
 
 # Browsable HTML report, and SARIF for GitHub Code Scanning
 surea11y scan ./dist/index.html --html report.html --sarif results.sarif
+
+# JUnit XML for the test views of GitLab, Azure DevOps, Jenkins and CircleCI
+surea11y scan ./dist/index.html --junit a11y.junit.xml
 
 # Your own org-specific rules
 surea11y scan ./dist/index.html --custom-rules ./a11y-rules.js

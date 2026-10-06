@@ -33,6 +33,7 @@ The CLI reads **static HTML only** — a local file, or the raw response of an H
 | `--baseline <path>` | Gate only on occurrences not already recorded in `<path>`. See [`BASELINE.md`](https://github.com/SureA11y/core/blob/main/docs/BASELINE.md). |
 | `--html <path>` | Write a self-contained, browsable HTML report to `<path>`. See [`REPORT.md`](https://github.com/SureA11y/core/blob/main/docs/REPORT.md). |
 | `--sarif <path>` | Write a SARIF 2.1.0 report to `<path>` (e.g. for GitHub Code Scanning). See [`SARIF.md`](https://github.com/SureA11y/core/blob/main/docs/SARIF.md). |
+| `--junit <path>` | Write a JUnit XML report to `<path>` (for the test views of GitLab, Azure DevOps, Jenkins, CircleCI). See [JUnit report](#junit-report) below. |
 | `-h`, `--help` | Show usage. |
 | `-v`, `--version` | Show the installed version. |
 
@@ -100,7 +101,7 @@ module.exports = [
 - Repeat the flag to load rules from more than one file: `--custom-rules ./a.js --custom-rules ./b.js`.
 - A custom rule's `id` colliding with a built-in one **overrides** that built-in for the scan, surfaced via a `console.warn` and the result's top-level `overriddenBuiltinIds` array — see [`OUTPUT_SCHEMA.md`](https://github.com/SureA11y/core/blob/main/docs/OUTPUT_SCHEMA.md).
 - The file itself is validated at load time (must export a descriptor, or array of descriptors, each with a string `id` and a function-or-source-string `runInPage`) — a malformed export exits `2` with a clear error rather than silently scanning with one fewer rule than expected.
-- Works alongside every other flag, including `--rules`/`--exclude-rules`/`--tags` (which can target your custom rule's `id` exactly like a built-in one) and `--baseline`/`--html`/`--sarif`.
+- Works alongside every other flag, including `--rules`/`--exclude-rules`/`--tags` (which can target your custom rule's `id` exactly like a built-in one) and `--baseline`/`--html`/`--sarif`/`--junit`.
 
 ## HTML report
 
@@ -121,6 +122,30 @@ surea11y scan ./dist/index.html --sarif results.sarif
 ```
 
 Works alongside any other output mode, and alongside `--baseline` (already-known `fail` occurrences are omitted from the SARIF output rather than re-reported). See [`SARIF.md`](https://github.com/SureA11y/core/blob/main/docs/SARIF.md).
+
+## JUnit report
+
+For CI systems that show JUnit XML in their own test views (GitLab's merge request test widget, Azure DevOps' Tests tab, Jenkins, CircleCI):
+
+```sh
+surea11y scan ./dist/index.html --junit a11y.junit.xml
+```
+
+Each WCAG criterion becomes a test suite and each rule a test case: a `fail` rule is a failing test, a `cantTell` rule a skipped one (it needs human review, so it never turns the report red), and `notApplicable` rules are left out. With `--baseline`, a rule whose every failure is already recorded in the baseline is reported as skipped, not failing. The report never changes the exit code. See [`JUNIT.md`](https://github.com/SureA11y/core/blob/main/docs/JUNIT.md) for the full mapping.
+
+For example, in GitLab CI:
+
+```yaml
+a11y:
+  script:
+    - npx @surea11y/cli scan ./dist/index.html --junit a11y.junit.xml
+  artifacts:
+    when: always
+    reports:
+      junit: a11y.junit.xml
+```
+
+`when: always` keeps the report when the scan fails the job, which is when you want to read it.
 
 ## In CI
 
