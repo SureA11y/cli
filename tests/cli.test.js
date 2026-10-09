@@ -856,3 +856,92 @@ test('CLI: --junit combined with --baseline reports known failures as skipped, n
   assert.match(xml, /failures="0"/);
   assert.match(xml, /<skipped message="1 known failure/);
 });
+
+// --- packs and profiles ------------------------------------------------------------
+
+const PACK_PAGE =
+  '<!doctype html><html lang="en"><head><title>T</title></head><body><main><img src="a.png"></main></body></html>';
+
+// A pack as a plain object (definePack only checks it): one rule of its own,
+// and a checklist profile whose one item groups core's img-alt-present.
+const PACK_SOURCE = `module.exports = {
+  name: '@acme/a11y-rules',
+  version: '1.0.0',
+  namespace: 'acme',
+  core: '*',
+  title: 'Acme policy',
+  rules: [{
+    id: 'acme-no-images',
+    meta: { title: 'No images', tags: ['house-rules'] },
+    runInPage(ctx) {
+      const imgs = ctx.helpers.queryAll('img');
+      return imgs.length
+        ? { outcome: 'fail', occurrences: imgs.map((el) => ({ selector: ctx.helpers.buildSelector(el), summary: 'An image.' })) }
+        : { outcome: 'pass' };
+    }
+  }],
+  profiles: { 'acme-1': { tags: ['wcag2a', 'wcag2aa'] } },
+  rollups: [{ id: 'acme-images', title: 'Images', checksIds: ['img-alt-present'] }]
+};`;
+
+function packFiles(name) {
+  const page = path.join(tmpDir, `${name}.html`);
+  fs.writeFileSync(page, PACK_PAGE);
+  const pack = path.join(tmpDir, `${name}-pack.js`);
+  fs.writeFileSync(pack, PACK_SOURCE);
+  return { page, pack };
+}
+
+test('CLI: --help lists --pack and --profile', () => {
+  const { stdout } = run(['--help']);
+  assert.match(stdout, /--pack <name-or-path>/);
+  assert.match(stdout, /--profile <name>/);
+});
+
+test('CLI: --pack runs the pack rules, and the result names it', () => {
+  const { page, pack } = packFiles('pack-rules');
+  const { stdout, status } = run(['scan', page, '--pack', pack, '--json']);
+  assert.equal(status, 1);
+  const result = JSON.parse(stdout);
+  assert.deepEqual(result.engine.packs, ['@acme/a11y-rules@1.0.0']);
+  assert.equal(result.checksResults.find((r) => r.ruleId === 'acme-no-images').outcome, 'fail');
+});
+
+test("CLI: --profile runs a pack's profile, its items included, and the summary names both", () => {
+  const { page, pack } = packFiles('pack-profile');
+  const json = JSON.parse(
+    run(['scan', page, '--pack', pack, '--profile', 'acme-1', '--json']).stdout
+  );
+  assert.equal(json.engine.profile, 'acme-1');
+  const item = json.rulesResults.find((r) => r.ruleId === 'acme-images');
+  assert.equal(item.outcome, 'fail');
+  const { stdout } = run(['scan', page, '--pack', pack, '--profile', 'acme-1']);
+  assert.match(stdout, /profile: acme-1/);
+  assert.match(stdout, /packs: @acme\/a11y-rules@1\.0\.0/);
+});
+
+test('CLI: a --profile that was not applied is a usage error (exit 2)', () => {
+  const { page } = packFiles('profile-missing');
+  const { stderr, status } = run(['scan', page, '--profile', 'acme-1']);
+  assert.equal(status, 2);
+  assert.match(stderr, /--profile "acme-1" was not applied/);
+  assert.match(stderr, /a pack's profile needs --pack/);
+});
+
+test('CLI: a --pack the engine could not run, or could not find, is a usage error (exit 2)', () => {
+  const { page } = packFiles('pack-invalid');
+  const invalid = path.join(tmpDir, 'pack-invalid-pack.js');
+  fs.writeFileSync(
+    invalid,
+    "module.exports = { name: 'old', version: '1.0.0', namespace: 'old', core: '^99.0.0' };"
+  );
+  const skipped = run(['scan', page, '--pack', invalid]);
+  assert.equal(skipped.status, 2);
+  assert.match(
+    skipped.stderr,
+    /1 pack\(s\) from --pack did not run:\n {2}- "old": .*supports core/
+  );
+  const missing = run(['scan', page, '--pack', './no-such-pack.js']);
+  assert.equal(missing.status, 2);
+  assert.match(missing.stderr, /Could not find pack "\.\/no-such-pack\.js": Cannot find module/);
+});

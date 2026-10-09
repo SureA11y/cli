@@ -2,6 +2,16 @@
 
 All notable changes to this package are documented here. This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Added
+
+- `--pack <name-or-path>` loads a pack (rules, a standard or a checklist, and their profiles and messages) by package name or path, and `--profile <name>` runs a conformance profile, a pack's included. The summary names both. A pack that can't be found, loaded or run, packs the installed core ignores, and a profile that isn't applied exit `2`. Packs need `@surea11y/core` 1.11 or later. See [`docs/CLI.md`](./docs/CLI.md#packs).
+
+### Changed
+
+- An error caused by another (a file that can't be loaded, say) shows the cause's first line, without Node's require stack.
+
 ## 1.1.0
 
 ### Added
