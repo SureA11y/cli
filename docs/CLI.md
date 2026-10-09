@@ -29,6 +29,8 @@ The CLI reads **static HTML only** — a local file, or the raw response of an H
 | `--tags <tags>` | Comma-separated tags — e.g. `--tags wcag2a,wcag2aa` to target a conformance level (see [`WCAG_CONFORMANCE.md`](https://github.com/SureA11y/core/blob/main/docs/WCAG_CONFORMANCE.md)). |
 | `--context <selector>` | Scope the scan to one CSS-selected subtree. A selector that matches no element, or that isn't valid CSS, exits `2`: nothing would be scanned. |
 | `--custom-rules <path>` | Load runtime custom rules from a local JS file. Repeatable. See [Custom rules](#custom-rules) below. |
+| `--pack <name-or-path>` | Load a pack: rules, a standard or a checklist, and their profiles, from a package installed in the project or a local file. Repeatable. See [Packs](#packs) below. |
+| `--profile <name>` | Run a conformance profile, such as `wcag22-aa` or a pack's own (`rgaa-4.1.2`). A profile that isn't applied exits `2`. See [`ENGINE_OPTIONS.md`](https://github.com/SureA11y/core/blob/main/docs/ENGINE_OPTIONS.md#conformance-profiles). |
 | `--write-baseline <path>` | Write every current `fail` occurrence to `<path>`; never fails the build. See [`BASELINE.md`](https://github.com/SureA11y/core/blob/main/docs/BASELINE.md). |
 | `--baseline <path>` | Gate only on occurrences not already recorded in `<path>`. See [`BASELINE.md`](https://github.com/SureA11y/core/blob/main/docs/BASELINE.md). |
 | `--html <path>` | Write a self-contained, browsable HTML report to `<path>`. See [`REPORT.md`](https://github.com/SureA11y/core/blob/main/docs/REPORT.md). |
@@ -63,6 +65,18 @@ surea11y scan ./dist/index.html --baseline baseline.json         # in CI, from t
 ```
 
 See [`BASELINE.md`](https://github.com/SureA11y/core/blob/main/docs/BASELINE.md) for the matching semantics, file format, and known limitations.
+
+## Packs
+
+A pack brings rules, variants of core's rules, a standard or an organisation's checklist, and their profiles and messages, from a package of its own (see [Packs in `ENGINE_OPTIONS.md`](https://github.com/SureA11y/core/blob/main/docs/ENGINE_OPTIONS.md#packs--rules-and-standards-from-outside-core)). `--pack` loads one by package name, resolved from the working directory, or by path; `--profile` runs one of its profiles:
+
+```sh
+npm install --save-dev @surea11y/rgaa
+surea11y scan ./dist/index.html --pack @surea11y/rgaa --profile rgaa-4.1.2
+surea11y scan ./dist/index.html --pack ./acme-pack.js
+```
+
+The summary names the profile and the packs that ran, and `--json` has them as `engine.profile` and `engine.packs`. Packs need `@surea11y/core` 1.11 or later. A scan exits `2`, with no report or baseline written, when it would check less than asked: a pack that can't be found or loaded, one the engine skips (it needs another core version, or clashes with core or another pack), packs the installed core ignores, or a `--profile` that wasn't applied (a pack's profile needs its `--pack`).
 
 ## Custom rules
 
