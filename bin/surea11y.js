@@ -86,7 +86,7 @@ Examples:
   surea11y scan ./index.html --baseline baseline.json --sarif results.sarif
   surea11y scan ./index.html --junit a11y.junit.xml
   surea11y scan ./index.html --custom-rules ./a11y-rules.js
-  surea11y scan ./index.html --pack @surea11y/rgaa --profile rgaa-4.1.2
+  surea11y scan ./index.html --pack @surea11y/pack-rgaa --profile rgaa-4.1.2
 
 See docs/CLI.md for the full reference (baseline/allowlist, HTML, SARIF and JUnit reports, custom rules):
 https://github.com/SureA11y/cli/blob/main/docs/CLI.md

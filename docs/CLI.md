@@ -71,8 +71,8 @@ See [`BASELINE.md`](https://github.com/SureA11y/core/blob/main/docs/BASELINE.md)
 A pack brings rules, variants of core's rules, a standard or an organisation's checklist, and their profiles and messages, from a package of its own (see [Packs in `ENGINE_OPTIONS.md`](https://github.com/SureA11y/core/blob/main/docs/ENGINE_OPTIONS.md#packs--rules-and-standards-from-outside-core)). `--pack` loads one by package name, resolved from the working directory, or by path; `--profile` runs one of its profiles:
 
 ```sh
-npm install --save-dev @surea11y/rgaa
-surea11y scan ./dist/index.html --pack @surea11y/rgaa --profile rgaa-4.1.2
+npm install --save-dev @surea11y/pack-rgaa
+surea11y scan ./dist/index.html --pack @surea11y/pack-rgaa --profile rgaa-4.1.2
 surea11y scan ./dist/index.html --pack ./acme-pack.js
 ```
 
