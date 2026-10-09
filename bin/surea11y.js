@@ -59,6 +59,8 @@ Options:
   --tags <tags>           Comma-separated tags to run (e.g. wcag2a,wcag2aa)
   --context <selector>    CSS selector to scope the scan to a subtree
   --custom-rules <path>   Load runtime custom rules from a JS file (repeatable)
+  --pack <name-or-path>   Load a pack (rules, a standard, its profiles), by package name or file (repeatable)
+  --profile <name>        Run a conformance profile (e.g. wcag22-aa, or a pack's own, such as rgaa-4.1.2)
   --write-baseline <path> Write every current "fail" occurrence to <path>; never fails the build
   --baseline <path>       Gate only on occurrences not already recorded in <path>
   --html <path>           Write a self-contained, browsable HTML report to <path>
@@ -84,6 +86,7 @@ Examples:
   surea11y scan ./index.html --baseline baseline.json --sarif results.sarif
   surea11y scan ./index.html --junit a11y.junit.xml
   surea11y scan ./index.html --custom-rules ./a11y-rules.js
+  surea11y scan ./index.html --pack @surea11y/rgaa --profile rgaa-4.1.2
 
 See docs/CLI.md for the full reference (baseline/allowlist, HTML, SARIF and JUnit reports, custom rules):
 https://github.com/SureA11y/cli/blob/main/docs/CLI.md
@@ -115,6 +118,12 @@ function parseArgs(argv) {
         break;
       case '--custom-rules':
         (out.customRules = out.customRules || []).push(argv[++i]);
+        break;
+      case '--pack':
+        (out.packs = out.packs || []).push(argv[++i]);
+        break;
+      case '--profile':
+        out.profile = argv[++i];
         break;
       case '--baseline':
         out.baseline = argv[++i];
@@ -150,11 +159,13 @@ function isUrl(s) {
   return /^https?:\/\//i.test(s);
 }
 
+// An error's message, and its cause's first line: Node's message for a module
+// it can't find carries its require stack after it.
 function formatError(err) {
   const base = err && err.message ? err.message : String(err);
   const cause =
     err && err.cause && err.cause.message
-      ? err.cause.message
+      ? err.cause.message.split('\n')[0]
       : err && err.cause
         ? String(err.cause)
         : '';
@@ -177,8 +188,10 @@ async function loadHtml(target) {
   return { html: fs.readFileSync(resolved, 'utf8'), url: `file://${resolved}` };
 }
 
-function buildEngineOptions(args, customRules) {
+function buildEngineOptions(args, customRules, packs) {
   const engineOptions = {};
+  if (args.profile) engineOptions.profile = args.profile;
+  if (packs && packs.length) engineOptions.packs = packs;
   if (args.locale) engineOptions.locale = args.locale;
   if (args.rules || args.excludeRules) {
     engineOptions.rules = {};
@@ -224,6 +237,42 @@ function loadCustomRulesFile(customRulesPath) {
   return descriptors;
 }
 
+// Loads one --pack: a file (a path, or a name ending in .js) relative to the
+// working directory, or a package installed there (or next to the CLI). The
+// engine checks the pack itself; a pack it can't run is reported after the
+// scan (findScanProblem). Packs need @surea11y/core 1.11 or later.
+function loadPack(spec) {
+  const isPath = /^[./\\]/.test(spec) || /\.[cm]?js$/.test(spec) || path.isAbsolute(spec);
+  let resolved;
+  try {
+    resolved = isPath
+      ? require.resolve(path.resolve(process.cwd(), spec))
+      : require.resolve(spec, { paths: [process.cwd(), __dirname] });
+  } catch (err) {
+    throw new Error(
+      isPath
+        ? `Could not find pack "${spec}"`
+        : `Could not find pack "${spec}"; install it in this project (npm install ${spec})`,
+      { cause: err }
+    );
+  }
+  let pack;
+  try {
+    pack = require(resolved);
+  } catch (err) {
+    throw new Error(`Could not load pack "${spec}"`, { cause: err });
+  }
+  if (pack && typeof pack === 'object' && pack.default && typeof pack.default === 'object') {
+    pack = pack.default;
+  }
+  if (!pack || typeof pack !== 'object' || typeof pack.name !== 'string') {
+    throw new Error(
+      `Pack "${spec}" must export a pack ({ name, version, namespace, core, ... }). See docs/CLI.md#packs.`
+    );
+  }
+  return pack;
+}
+
 // The engine throws with a `code` when an option can't mean what was asked:
 // a --rules or --tags list that names no rule or tag (INVALID_RUN_ONLY), or a
 // --context selector the DOM can't parse (INVALID_CONTEXT_SELECTOR). Its
@@ -248,6 +297,22 @@ function findScanProblem(result, args) {
   const contextMatch = result && result.contextMatch;
   if (args.context && contextMatch && contextMatch.elementCount === 0) {
     return `--context "${args.context}" matched no element, so nothing was scanned. Check the selector against the page.`;
+  }
+
+  const skippedPacks = (result && result.skippedPacks) || [];
+  if (skippedPacks.length) {
+    const lines = skippedPacks.map(
+      (s) => `  - ${s.name ? `"${s.name}"` : '(no name)'}: ${s.reason}`
+    );
+    return `${skippedPacks.length} pack(s) from --pack did not run:\n${lines.join('\n')}\nSee docs/CLI.md#packs.`;
+  }
+
+  if (args.packs && args.packs.length && !(result && result.engine && result.engine.packs)) {
+    return '--pack needs @surea11y/core 1.11 or later, which runs packs; this one ignored them. See docs/CLI.md#packs.';
+  }
+
+  if (args.profile && !(result && result.engine && result.engine.profile === args.profile)) {
+    return `--profile "${args.profile}" was not applied: no such profile${args.packs && args.packs.length ? ' in core or the packs given' : " in core (a pack's profile needs --pack)"}. Nothing was scanned against it.`;
   }
 
   const skipped = (result && result.skippedCustomRules) || [];
@@ -293,6 +358,12 @@ function printSummary(result, baselineMatch) {
   process.stdout.write(`\nsurea11y scan: ${result.url || '(no url)'}\n`);
   if (result.engine && result.engine.version) {
     process.stdout.write(`  engine: @surea11y/core ${result.engine.version}\n`);
+  }
+  if (result.engine && result.engine.profile) {
+    process.stdout.write(`  profile: ${result.engine.profile}\n`);
+  }
+  if (result.engine && Array.isArray(result.engine.packs) && result.engine.packs.length) {
+    process.stdout.write(`  packs: ${result.engine.packs.join(', ')}\n`);
   }
   process.stdout.write(
     `  pass: ${byOutcome.pass}   fail: ${byOutcome.fail}   cantTell: ${byOutcome.cantTell}   notApplicable: ${byOutcome.notApplicable}\n\n`
@@ -427,6 +498,17 @@ async function runScan(args) {
     }
   }
 
+  let packs = [];
+  if (args.packs && args.packs.length) {
+    try {
+      packs = args.packs.map(loadPack);
+    } catch (err) {
+      process.stderr.write(`Error: ${formatError(err)}\n`);
+      process.exitCode = 2;
+      return;
+    }
+  }
+
   let html, url;
   try {
     ({ html, url } = await loadHtml(target));
@@ -459,7 +541,7 @@ async function runScan(args) {
     result = runDomRulesInPage(
       url,
       args.context || null,
-      buildEngineOptions(args, customRules),
+      buildEngineOptions(args, customRules, packs),
       null
     );
   } catch (err) {
