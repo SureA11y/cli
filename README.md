@@ -75,9 +75,12 @@ surea11y scan ./dist/index.html --junit a11y.junit.xml
 
 # Your own org-specific rules
 surea11y scan ./dist/index.html --custom-rules ./a11y-rules.js
+
+# A standard or checklist from a pack, with its profile (core 1.11 or later)
+surea11y scan ./dist/index.html --pack @surea11y/rgaa --profile rgaa-4.1.2
 ```
 
-Full flag reference, custom-rule contract, and CI recipes: [`docs/CLI.md`](./docs/CLI.md).
+Full flag reference, custom-rule contract, packs, and CI recipes: [`docs/CLI.md`](./docs/CLI.md).
 
 ## Do you need this package?
 
