@@ -4,7 +4,7 @@ Command-line WCAG 2.2 accessibility scanner for static HTML — baseline gating,
 
 ```sh
 npx @surea11y/cli scan ./index.html
-npx @surea11y/cli scan https://example.com/ --tags wcag2a,wcag2aa
+npx @surea11y/cli scan https://example.com/ --wcag 2.2
 ```
 
 ## Install
@@ -22,23 +22,40 @@ Requires Node.js `^20.19.0 || ^22.13.0 || >=24.0.0`.
 $ surea11y scan ./index.html
 
 surea11y scan: file:///path/to/index.html
-  engine: @surea11y/core 1.10.0
-  pass: 6   fail: 3   cantTell: 4   notApplicable: 112
+  engine: @surea11y/core 1.11.1
+  pass: 15   fail: 4   cantTell: 4   notApplicable: 111
 
-  occurrences by tier: fail: 3   cantTell: 5
+  occurrences by tier: fail: 4   cantTell: 5
 
-FAIL (3 rule(s)):
+FAIL (4 rule(s)):
+
+  button-name-present  (serious, 1 fail occurrence(s))
+    - html > body > main > button
+      This button has no accessible name.
+      hint: Give the button visible text, or name it with aria-label, so screen
+      reader users know what it does.
+
+  contrast-enhanced  (serious, 1 fail occurrence(s))
+    - html > body > main > p
+      Element has insufficient color contrast (AAA) of 2.85:1 (foreground:
+      #999999, background: #ffffff, font size: 16px, font weight: normal).
+      Expected contrast ratio of 7:1 (normal text).
+      hint: Change the text color, the background color, or both, so the
+      contrast ratio reaches at least 7:1.
 
   contrast-minimum  (serious, 1 fail occurrence(s))
     - html > body > main > p
       Element has insufficient color contrast of 2.85:1 (foreground: #999999,
-      background: #ffffff, font size: 0px, font weight: normal). Expected
+      background: #ffffff, font size: 16px, font weight: normal). Expected
       contrast ratio of 4.5:1 (normal text).
+      hint: Change the text color, the background color, or both, so the
+      contrast ratio reaches at least 4.5:1.
 
   img-alt-present  (serious, 1 fail occurrence(s))
     - html > body > main > img
-      Missing alt attribute on <img>.
-      hint: Add an alt attribute (use alt="" only for decorative images).
+      This <img> has no alt attribute.
+      hint: Add an alt attribute that says what the image shows, or alt="" if
+      the image is purely decorative.
 
 cantTell — needs human review (4 rule(s)): contrast-computable, link-name-quality,
 manual-review, page-title-patterns
@@ -46,7 +63,7 @@ manual-review, page-title-patterns
 
 That last line is the point of the engine: rules that *cannot* be settled from static markup are reported as `cantTell` and routed to a human, instead of being silently dropped or guessed at. `cantTell` never affects the exit code.
 
-Exit code `0` = clean, `1` = at least one `fail` (the CI-gating case), `2` = usage error or the scan couldn't run, including a scan that would have checked nothing (a `--rules`/`--tags` typo, a `--context` selector that matches nothing).
+Exit code `0` = clean, `1` = at least one `fail` (the CI-gating case), `2` = usage error or the scan couldn't run, including a scan that would have checked nothing or less than asked (a `--rules`/`--tags` typo, a `--context` selector that matches nothing, a custom rule or a pack that didn't run, a `--profile` that wasn't applied).
 
 ## What it can and can't scan
 
@@ -57,11 +74,15 @@ For client-rendered pages, drive a real browser and call the engine directly aga
 ## Common uses
 
 ```sh
-# Target a conformance level
-surea11y scan ./dist/index.html --tags wcag2a,wcag2aa
+# Target a WCAG version and level (AA unless --wcag-level says otherwise)
+surea11y scan ./dist/index.html --wcag 2.2
 
-# Machine-readable output
+# The same, and the best-practice rules, which test no WCAG criterion
+surea11y scan ./dist/index.html --wcag 2.2 --best-practices
+
+# Machine-readable output, in full or compact
 surea11y scan ./dist/index.html --json > result.json
+surea11y scan ./dist/index.html --compact --json > result.json
 
 # Accept today's violations, gate CI only on new ones
 surea11y scan ./dist/index.html --write-baseline baseline.json   # once, commit it
@@ -76,11 +97,11 @@ surea11y scan ./dist/index.html --junit a11y.junit.xml
 # Your own org-specific rules
 surea11y scan ./dist/index.html --custom-rules ./a11y-rules.js
 
-# A standard or checklist from a pack, with its profile (core 1.11 or later)
-surea11y scan ./dist/index.html --pack @surea11y/rgaa --profile rgaa-4.1.2
+# A standard or your organisation's checklist, from a pack, with its profile
+surea11y scan ./dist/index.html --pack ./acme-policy-pack.js --profile acme-web-2026
 ```
 
-Full flag reference, custom-rule contract, packs, and CI recipes: [`docs/CLI.md`](./docs/CLI.md).
+Full flag reference, custom-rule contract, packs, and CI recipes: [`docs/CLI.md`](./docs/CLI.md). Its [Packs](./docs/CLI.md#packs) section has `acme-policy-pack.js`, a small pack to copy, with a page and the command that scans it.
 
 ## Do you need this package?
 
@@ -93,7 +114,7 @@ A marketing site built to static HTML. The CI step is one shell line; there's no
 ```yaml
 # .github/workflows/a11y.yml
 - run: npm run build
-- run: npx @surea11y/cli scan ./dist/index.html --tags wcag2a,wcag2aa
+- run: npx @surea11y/cli scan ./dist/index.html --wcag 2.2
 ```
 
 The scan exits `1` if anything fails, which fails the step. You wrote no JavaScript, so you needed the command.

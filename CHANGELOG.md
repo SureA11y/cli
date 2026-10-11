@@ -6,11 +6,22 @@ All notable changes to this package are documented here. This project adheres to
 
 ### Added
 
-- `--pack <name-or-path>` loads a pack (rules, a standard or a checklist, and their profiles and messages) by package name or path, and `--profile <name>` runs a conformance profile, a pack's included. The summary names both. A pack that can't be found, loaded or run, packs the installed core ignores, and a profile that isn't applied exit `2`. Packs need `@surea11y/core` 1.11 or later. See [`docs/CLI.md`](./docs/CLI.md#packs).
+- `--pack <name-or-path>` loads a pack (rules, a standard or a checklist, and their profiles and messages) by package name, resolved from the working directory's project, or by path, and `--profile <name>` runs a conformance profile, a pack's included. Repeat `--pack` for several packs. The summary names both. See [`docs/CLI.md`](./docs/CLI.md#packs), which has a small policy pack to copy and a page to scan with it.
+- `--wcag <version>` runs the rules for a WCAG conformance target (`2.0`, `2.1` or `2.2`), at `--wcag-level <level>` (`A`, `AA`, the default, or `AAA`) and below, by the level each criterion has in that version. `--best-practices` adds the rules that test no WCAG criterion, or runs only those on its own. `--rules` and `--tags` add to a target's rules, and `--exclude-rules` applies after. See [`docs/CLI.md`](./docs/CLI.md#wcag-target-and-best-practices).
+- `--compact` asks the engine for a smaller result: a rule that passed or did not apply keeps only its `ruleId`, `outcome` and `type`. The summary, exit code, baseline and reports are unchanged; a small page's `--json` goes from about 359 KB to 136 KB. See [`docs/CLI.md`](./docs/CLI.md#compact-results).
 
 ### Changed
 
+- A scan that would check less than asked exits `2`, as a scan that checked nothing does, and writes no report or baseline: a pack that can't be found or loaded, a pack the engine skips (`skippedPacks`, such as one whose `core` range leaves out the installed core), and a `--profile` that wasn't applied, either because no such profile exists or because `--rules`, `--tags` or `--wcag` chose the rules in its place. A rule selection whose parts cancel each other (`--rules a --exclude-rules a`, or `--rules` and `--tags` with no rule in common) ran no rule and passed; it exits `2` too. The error says which.
 - An error caused by another (a file that can't be loaded, say) shows the cause's first line, without Node's require stack.
+- Messages are those of `@surea11y/core` 1.11, reworded to say plainly what is wrong and what to do (`This <img> has no alt attribute.`). Rule IDs and baselines are unchanged; a script that matches the summary's text needs the new wording.
+- The `--help` and README examples target a conformance level with `--wcag 2.2`.
+- `--sarif` writes `partialFingerprints['surea11y/violation/v2']` in place of `v1`, as core 1.11 does. `primaryLocationLineHash`, which GitHub Code Scanning matches alerts on, is unchanged; a tool that read `v1` sees each finding as new once.
+- The contrast rules read a font size given as a keyword (`xx-large`) or a `calc()` as a browser does, where jsdom gave them 0px, so large text is held to its own threshold.
+
+### Requires
+
+- `@surea11y/core` `^1.11.1` (was `^1.10.0`): packs, the WCAG target, the best practices and compact results are 1.11's.
 
 ## 1.1.0
 

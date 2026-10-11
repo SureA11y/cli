@@ -884,6 +884,17 @@ const PACK_SOURCE = `module.exports = {
   rollups: [{ id: 'acme-images', title: 'Images', checksIds: ['img-alt-present'] }]
 };`;
 
+const CLI_DOC = fs.readFileSync(path.join(__dirname, '..', 'docs', 'CLI.md'), 'utf8');
+const ACME_POLICY_PACK = CLI_DOC.match(/```js\n(\/\/ acme-policy-pack\.js\n[\s\S]*?)```/)[1];
+
+function linkCore(project) {
+  fs.mkdirSync(path.join(project, 'node_modules', '@surea11y'), { recursive: true });
+  fs.symlinkSync(
+    path.dirname(require.resolve('@surea11y/core/package.json')),
+    path.join(project, 'node_modules', '@surea11y', 'core')
+  );
+}
+
 function packFiles(name) {
   const page = path.join(tmpDir, `${name}.html`);
   fs.writeFileSync(page, PACK_PAGE);
@@ -944,4 +955,234 @@ test('CLI: a --pack the engine could not run, or could not find, is a usage erro
   const missing = run(['scan', page, '--pack', './no-such-pack.js']);
   assert.equal(missing.status, 2);
   assert.match(missing.stderr, /Could not find pack "\.\/no-such-pack\.js": Cannot find module/);
+});
+
+test('CLI: --pack by package name resolves from the working directory, and its profile runs', () => {
+  const project = path.join(tmpDir, 'pack-by-name');
+  const packDir = path.join(project, 'node_modules', '@acme', 'a11y-policy');
+  fs.mkdirSync(packDir, { recursive: true });
+  linkCore(project);
+  fs.writeFileSync(
+    path.join(packDir, 'package.json'),
+    JSON.stringify({ name: '@acme/a11y-policy', version: '1.0.0', main: 'index.js' })
+  );
+  fs.writeFileSync(path.join(packDir, 'index.js'), ACME_POLICY_PACK);
+  fs.writeFileSync(
+    path.join(project, 'page.html'),
+    '<!doctype html><html lang="en"><head><title>T</title></head><body><main><video src="a.mp4" autoplay></video></main></body></html>'
+  );
+
+  const { stdout, status } = run(
+    ['scan', 'page.html', '--pack', '@acme/a11y-policy', '--profile', 'acme-web-2026', '--json'],
+    { cwd: project }
+  );
+  assert.equal(status, 1);
+  const result = JSON.parse(stdout);
+  assert.deepEqual(result.engine.packs, ['@acme/a11y-policy@1.0.0']);
+  assert.equal(result.engine.profile, 'acme-web-2026');
+  assert.equal(result.checksResults.find((r) => r.ruleId === 'acme-no-autoplay').outcome, 'fail');
+  assert.equal(result.rulesResults.find((r) => r.ruleId === 'acme-media').outcome, 'fail');
+});
+
+test('CLI: a --pack name not installed in the project exits 2 and says how to install it', () => {
+  const page = writeSimplePage('pack-not-installed.html');
+  const { status, stderr } = run(['scan', page, '--pack', '@acme/not-installed']);
+  assert.equal(status, 2);
+  assert.match(
+    stderr,
+    /Could not find pack "@acme\/not-installed"; install it in this project \(npm install @acme\/not-installed\)/
+  );
+});
+
+test('CLI: a --pack the engine skips writes no report or baseline', () => {
+  const { page } = packFiles('pack-skipped-outputs');
+  const pack = path.join(tmpDir, 'pack-skipped-outputs-old.js');
+  fs.writeFileSync(
+    pack,
+    "module.exports = { name: 'old', version: '1.0.0', namespace: 'old', core: '^99.0.0' };"
+  );
+  const sarif = path.join(tmpDir, 'pack-skipped.sarif');
+  const baseline = path.join(tmpDir, 'pack-skipped-baseline.json');
+  const { status, stdout } = run([
+    'scan',
+    page,
+    '--pack',
+    pack,
+    '--sarif',
+    sarif,
+    '--write-baseline',
+    baseline,
+    '--json'
+  ]);
+  assert.equal(status, 2);
+  assert.equal(stdout, '');
+  assert.equal(fs.existsSync(sarif), false);
+  assert.equal(fs.existsSync(baseline), false);
+});
+
+test('CLI: --profile names a profile in any case, as the engine does', () => {
+  const page = writeSimplePage('profile-case.html');
+  const { stdout, status } = run(['scan', page, '--profile', 'WCAG22-AA', '--json']);
+  assert.equal(status, 1);
+  assert.equal(JSON.parse(stdout).engine.profile, 'wcag22-aa');
+});
+
+// --- WCAG target, best practices, compact results ---------------------------------
+
+const TARGET_PAGE =
+  '<!doctype html><html lang="en"><head><title>T</title></head><body><main><img src="a.png"></main><div>Outside</div></body></html>';
+
+function scanIds(name, args) {
+  const page = path.join(tmpDir, `${name}.html`);
+  fs.writeFileSync(page, TARGET_PAGE);
+  const { stdout, stderr, status } = run(['scan', page, ...args, '--json']);
+  return {
+    status,
+    stderr,
+    ids: stdout ? JSON.parse(stdout).checksResults.map((r) => r.ruleId) : []
+  };
+}
+
+test('CLI: --help lists --wcag, --wcag-level, --best-practices and --compact', () => {
+  const { stdout } = run(['--help']);
+  assert.match(stdout, /--wcag <version>/);
+  assert.match(stdout, /--wcag-level <level>/);
+  assert.match(stdout, /--best-practices/);
+  assert.match(stdout, /--compact/);
+});
+
+test('CLI: --wcag runs the rules of a WCAG target, by version and level', () => {
+  const aa22 = scanIds('wcag-22-aa', ['--wcag', '2.2']);
+  assert.equal(aa22.status, 1);
+  assert.ok(aa22.ids.includes('img-alt-present'));
+  assert.ok(aa22.ids.includes('target-size-minimum'));
+  assert.ok(!aa22.ids.includes('duplicate-id'));
+  assert.ok(!aa22.ids.includes('region'));
+
+  const a21 = scanIds('wcag-21-a', ['--wcag', '2.1', '--wcag-level', 'A']);
+  assert.ok(a21.ids.includes('duplicate-id'));
+  assert.ok(!a21.ids.includes('target-size-minimum'));
+  assert.ok(a21.ids.length < aa22.ids.length);
+});
+
+test('CLI: --best-practices alone runs only the best-practice rules', () => {
+  const { ids } = scanIds('best-practices-only', ['--best-practices']);
+  assert.ok(ids.includes('region'));
+  assert.ok(!ids.includes('img-alt-present'));
+});
+
+test('CLI: --wcag with --best-practices, --tags and --exclude-rules combines them', () => {
+  const both = scanIds('wcag-bp', ['--wcag', '2.2', '--best-practices']);
+  assert.ok(both.ids.includes('region'));
+  assert.ok(both.ids.includes('img-alt-present'));
+
+  const tagged = scanIds('wcag-tags', ['--wcag', '2.2', '--tags', 'best-practice']);
+  assert.ok(tagged.ids.includes('region'));
+
+  const excluded = scanIds('wcag-exclude', [
+    '--wcag',
+    '2.2',
+    '--best-practices',
+    '--exclude-rules',
+    'region,img-alt-present'
+  ]);
+  assert.ok(!excluded.ids.includes('region'));
+  assert.ok(!excluded.ids.includes('img-alt-present'));
+});
+
+test('CLI: --best-practices beside --profile adds its rules and keeps the profile', () => {
+  const page = writeSimplePage('profile-best-practices.html');
+  const { stdout } = run(['scan', page, '--profile', 'wcag22-aa', '--best-practices', '--json']);
+  const result = JSON.parse(stdout);
+  assert.equal(result.engine.profile, 'wcag22-aa');
+  assert.ok(result.checksResults.some((r) => r.ruleId === 'region'));
+});
+
+test('CLI: an invalid --wcag or --wcag-level, or a level without a version, exits 2 naming the flag', () => {
+  const version = scanIds('wcag-bad-version', ['--wcag', '3.0']);
+  assert.equal(version.status, 2);
+  assert.match(version.stderr, /Error: --wcag must be "2\.0", "2\.1" or "2\.2", not "3\.0"\./);
+
+  const level = scanIds('wcag-bad-level', ['--wcag', '2.2', '--wcag-level', 'B']);
+  assert.equal(level.status, 2);
+  assert.match(level.stderr, /Error: --wcag-level must be "A", "AA" or "AAA", not "B"\./);
+
+  const alone = scanIds('wcag-level-alone', ['--wcag-level', 'AA']);
+  assert.equal(alone.status, 2);
+  assert.match(alone.stderr, /Error: --wcag-level needs --wcag/);
+});
+
+test('CLI: --rules naming no known rule beside --wcag still exits 2 naming the flag', () => {
+  const { status, stderr } = scanIds('wcag-rules-typo', [
+    '--wcag',
+    '2.2',
+    '--rules',
+    'img-alt-presnt'
+  ]);
+  assert.equal(status, 2);
+  assert.match(stderr, /Error: --rules: no rule named "img-alt-presnt"\. No rule ran\./);
+});
+
+test('CLI: --profile beside --wcag is not applied, and exits 2 saying why', () => {
+  const { status, stderr } = scanIds('profile-and-wcag', [
+    '--profile',
+    'wcag22-aa',
+    '--wcag',
+    '2.2'
+  ]);
+  assert.equal(status, 2);
+  assert.match(
+    stderr,
+    /--profile "wcag22-aa" was not applied: --wcag chose the rules in its place, so give one or the other/
+  );
+});
+
+test('CLI: --compact keeps pass and notApplicable results short, and the reports unchanged', () => {
+  const page = writeSimplePage('compact.html');
+  const full = path.join(tmpDir, 'compact-full.sarif');
+  const compact = path.join(tmpDir, 'compact-compact.sarif');
+  const fullRun = run(['scan', page, '--json', '--sarif', full]);
+  const compactRun = run(['scan', page, '--compact', '--json', '--sarif', compact]);
+  assert.equal(compactRun.status, fullRun.status);
+
+  const result = JSON.parse(compactRun.stdout);
+  assert.equal(result.engine.outputDetail, 'findings');
+  const passed = result.checksResults.find((r) => r.outcome === 'pass');
+  assert.deepEqual(Object.keys(passed).sort(), ['outcome', 'ruleId', 'type']);
+  assert.ok(compactRun.stdout.length < fullRun.stdout.length / 2);
+  assert.equal(fs.readFileSync(compact, 'utf8'), fs.readFileSync(full, 'utf8'));
+});
+
+test('CLI: the pack example in docs/CLI.md prints the output it shows', () => {
+  const project = path.join(tmpDir, 'docs-pack-example');
+  fs.mkdirSync(project);
+  linkCore(project);
+  fs.writeFileSync(path.join(project, 'acme-policy-pack.js'), ACME_POLICY_PACK);
+  const page = CLI_DOC.match(/cat > page\.html <<'HTML'\n([\s\S]*?)\nHTML\n/)[1];
+  fs.writeFileSync(path.join(project, 'page.html'), page + '\n');
+  const expected = CLI_DOC.match(
+    /```\n(surea11y scan: file:\/\/\/path\/to\/page\.html\n[\s\S]*?)```/
+  )[1];
+
+  const { stdout, status } = run(
+    ['scan', './page.html', '--pack', './acme-policy-pack.js', '--profile', 'acme-web-2026'],
+    { cwd: project }
+  );
+  assert.equal(status, 1);
+  assert.equal(
+    stdout.replace(/file:\/\/\S*\/page\.html/, 'file:///path/to/page.html').trim(),
+    expected.trim()
+  );
+});
+
+test('CLI: a rule selection that cancels itself out exits 2 rather than passing', () => {
+  const { status, ids, stderr } = scanIds('selection-cancels', [
+    '--rules',
+    'img-alt-present',
+    '--exclude-rules',
+    'img-alt-present'
+  ]);
+  assert.equal(status, 2);
+  assert.deepEqual(ids, []);
+  assert.match(stderr, /Error: No rule ran: .*Nothing was checked\./);
 });
