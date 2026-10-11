@@ -57,14 +57,14 @@
     "prepublishOnly": "npm run lint && npm test"
   },
   "dependencies": {
-    "@surea11y/core": "^1.10.0",
+    "@surea11y/core": "^1.11.1",
     "jsdom": "^29.1.1"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "eslint": "^10.8.0",
+    "eslint": "^10.12.0",
     "eslint-config-prettier": "^10.1.8",
-    "globals": "^17.8.0",
-    "prettier": "^3.9.6"
+    "globals": "^17.13.0",
+    "prettier": "^3.9.10"
   }
 }

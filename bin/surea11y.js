@@ -57,15 +57,19 @@ Options:
   --rules <ids>           Comma-separated rule IDs to run (only these)
   --exclude-rules <ids>   Comma-separated rule IDs to exclude
   --tags <tags>           Comma-separated tags to run (e.g. wcag2a,wcag2aa)
+  --wcag <version>        Run the rules for a WCAG target: 2.0, 2.1 or 2.2, at --wcag-level and below
+  --wcag-level <level>    The --wcag target's level: A, AA (default) or AAA
+  --best-practices        Also run the best-practice rules, which test no WCAG criterion (alone: only those)
   --context <selector>    CSS selector to scope the scan to a subtree
   --custom-rules <path>   Load runtime custom rules from a JS file (repeatable)
   --pack <name-or-path>   Load a pack (rules, a standard, its profiles), by package name or file (repeatable)
-  --profile <name>        Run a conformance profile (e.g. wcag22-aa, or a pack's own, such as rgaa-4.1.2)
+  --profile <name>        Run a conformance profile (e.g. en301549-v4.1.1, or a pack's own)
   --write-baseline <path> Write every current "fail" occurrence to <path>; never fails the build
   --baseline <path>       Gate only on occurrences not already recorded in <path>
   --html <path>           Write a self-contained, browsable HTML report to <path>
   --sarif <path>          Write a SARIF 2.1.0 report to <path> (for GitHub Code Scanning etc.)
   --junit <path>          Write a JUnit XML report to <path> (for GitLab, Azure DevOps, Jenkins, CircleCI)
+  --compact               Keep pass/notApplicable results to their rule, outcome and type (a smaller --json)
   -h, --help              Show this help
   -v, --version           Show the installed version
 
@@ -73,12 +77,14 @@ Exit codes:
   0  scan completed, no "fail" outcomes (or no *new* ones, with --baseline)
   1  scan completed, at least one "fail" outcome (or *new* one, with --baseline)
   2  usage error or the scan itself could not run (bad path/URL, network failure,
-     a --rules/--tags list naming no rule or tag, a --context selector that is
-     invalid or matches nothing, a custom rule the engine could not run, etc.)
+     a --rules/--tags list naming no rule or tag, or a selection that runs no
+     rule, a --context selector that is invalid or matches nothing, a custom
+     rule or a pack the engine could not run, a --profile that was not
+     applied, etc.)
 
 Examples:
   surea11y scan ./index.html
-  surea11y scan https://example.com/ --tags wcag2a,wcag2aa
+  surea11y scan https://example.com/ --wcag 2.2 --wcag-level AA
   surea11y scan ./index.html --json > result.json
   surea11y scan ./index.html --write-baseline baseline.json
   surea11y scan ./index.html --baseline baseline.json
@@ -86,9 +92,9 @@ Examples:
   surea11y scan ./index.html --baseline baseline.json --sarif results.sarif
   surea11y scan ./index.html --junit a11y.junit.xml
   surea11y scan ./index.html --custom-rules ./a11y-rules.js
-  surea11y scan ./index.html --pack @surea11y/rgaa --profile rgaa-4.1.2
+  surea11y scan ./index.html --pack ./acme-policy-pack.js --profile acme-web-2026
 
-See docs/CLI.md for the full reference (baseline/allowlist, HTML, SARIF and JUnit reports, custom rules):
+See docs/CLI.md for the full reference (baseline/allowlist, HTML, SARIF and JUnit reports, custom rules, packs):
 https://github.com/SureA11y/cli/blob/main/docs/CLI.md
 `);
 }
@@ -124,6 +130,18 @@ function parseArgs(argv) {
         break;
       case '--profile':
         out.profile = argv[++i];
+        break;
+      case '--wcag':
+        out.wcag = argv[++i];
+        break;
+      case '--wcag-level':
+        out.wcagLevel = argv[++i];
+        break;
+      case '--best-practices':
+        out.bestPractices = true;
+        break;
+      case '--compact':
+        out.compact = true;
         break;
       case '--baseline':
         out.baseline = argv[++i];
@@ -193,14 +211,41 @@ function buildEngineOptions(args, customRules, packs) {
   if (args.profile) engineOptions.profile = args.profile;
   if (packs && packs.length) engineOptions.packs = packs;
   if (args.locale) engineOptions.locale = args.locale;
+  if (args.compact) engineOptions.output = { detail: 'findings' };
+  if (customRules && customRules.length) engineOptions.customRules = customRules;
+  if (usesRunOnly(args)) return engineOptions;
   if (args.rules || args.excludeRules) {
     engineOptions.rules = {};
     if (args.rules) engineOptions.rules.include = args.rules;
     if (args.excludeRules) engineOptions.rules.exclude = args.excludeRules;
   }
   if (args.tags) engineOptions.tags = { include: args.tags };
-  if (customRules && customRules.length) engineOptions.customRules = customRules;
   return engineOptions;
+}
+
+function usesRunOnly(args) {
+  return Boolean(args.wcag || args.bestPractices);
+}
+
+function splitList(value) {
+  return value
+    .split(',')
+    .map((v) => v.trim())
+    .filter(Boolean);
+}
+
+// A WCAG target and the best practices exist only in runOnly, and a runOnly
+// filter makes the engine ignore engineOptions' rule and tag lists, so with
+// either of them --rules, --exclude-rules and --tags move here too.
+function buildRunOnly(args) {
+  if (!usesRunOnly(args)) return null;
+  const runOnly = {};
+  if (args.wcag) runOnly.wcag = { version: args.wcag, level: args.wcagLevel || 'AA' };
+  if (args.bestPractices) runOnly.bestPractices = true;
+  if (args.rules) runOnly.includeRuleIds = splitList(args.rules);
+  if (args.tags) runOnly.tags = splitList(args.tags);
+  if (args.excludeRules) runOnly.excludeRuleIds = splitList(args.excludeRules);
+  return runOnly;
 }
 
 // Loads one --custom-rules file. Rules run in the same process as the scan, so
@@ -240,7 +285,7 @@ function loadCustomRulesFile(customRulesPath) {
 // Loads one --pack: a file (a path, or a name ending in .js) relative to the
 // working directory, or a package installed there (or next to the CLI). The
 // engine checks the pack itself; a pack it can't run is reported after the
-// scan (findScanProblem). Packs need @surea11y/core 1.11 or later.
+// scan (findScanProblem).
 function loadPack(spec) {
   const isPath = /^[./\\]/.test(spec) || /\.[cm]?js$/.test(spec) || path.isAbsolute(spec);
   let resolved;
@@ -280,9 +325,15 @@ function loadPack(spec) {
 function describeEngineError(err) {
   const message = formatError(err);
   if (err && err.code === 'INVALID_RUN_ONLY') {
+    if (/^runOnly\.wcag\.version\b/.test(message)) {
+      return message.replace(/^runOnly\.wcag\.version\b/, '--wcag');
+    }
+    if (/^runOnly\.wcag\.level\b/.test(message)) {
+      return message.replace(/^runOnly\.wcag\.level\b/, '--wcag-level');
+    }
     return `${message
-      .replace(/^engineOptions\.rules\.include\b/, '--rules')
-      .replace(/^engineOptions\.tags\.include\b/, '--tags')} No rule ran.`;
+      .replace(/^(engineOptions\.rules\.include|runOnly\.includeRuleIds)\b/, '--rules')
+      .replace(/^(engineOptions\.tags\.include|runOnly\.tags)\b/, '--tags')} No rule ran.`;
   }
   if (err && err.code === 'INVALID_CONTEXT_SELECTOR') {
     return message.replace(/^contextSelector\b/, '--context');
@@ -290,13 +341,17 @@ function describeEngineError(err) {
   return message;
 }
 
-// A scan can complete without having checked what was asked for. Both cases
+// A scan can complete without having checked what was asked for. Each case
 // below would otherwise look like a clean result and pass a CI gate, so they
 // are errors (exit 2), like a custom rules file that fails validation.
 function findScanProblem(result, args) {
   const contextMatch = result && result.contextMatch;
   if (args.context && contextMatch && contextMatch.elementCount === 0) {
     return `--context "${args.context}" matched no element, so nothing was scanned. Check the selector against the page.`;
+  }
+
+  if (result && Array.isArray(result.checksResults) && result.checksResults.length === 0) {
+    return 'No rule ran: what --rules, --tags or --wcag include, --exclude-rules excludes, or --rules and --tags have no rule in common. Nothing was checked.';
   }
 
   const skippedPacks = (result && result.skippedPacks) || [];
@@ -307,11 +362,22 @@ function findScanProblem(result, args) {
     return `${skippedPacks.length} pack(s) from --pack did not run:\n${lines.join('\n')}\nSee docs/CLI.md#packs.`;
   }
 
-  if (args.packs && args.packs.length && !(result && result.engine && result.engine.packs)) {
-    return '--pack needs @surea11y/core 1.11 or later, which runs packs; this one ignored them. See docs/CLI.md#packs.';
-  }
-
-  if (args.profile && !(result && result.engine && result.engine.profile === args.profile)) {
+  const appliedProfile = result && result.engine && result.engine.profile;
+  // The engine matches profile names in any case and reports its own spelling.
+  if (
+    args.profile &&
+    !(appliedProfile && appliedProfile.toLowerCase() === args.profile.toLowerCase())
+  ) {
+    const selectors = [
+      ['--rules', args.rules],
+      ['--tags', args.tags],
+      ['--wcag', args.wcag]
+    ]
+      .filter(([, given]) => given)
+      .map(([flag]) => flag);
+    if (selectors.length) {
+      return `--profile "${args.profile}" was not applied: ${selectors.join(' and ')} chose the rules in its place, so give one or the other. Nothing was scanned against it.`;
+    }
     return `--profile "${args.profile}" was not applied: no such profile${args.packs && args.packs.length ? ' in core or the packs given' : " in core (a pack's profile needs --pack)"}. Nothing was scanned against it.`;
   }
 
@@ -466,6 +532,14 @@ async function runScan(args) {
     return;
   }
 
+  if (args.wcagLevel && !args.wcag) {
+    process.stderr.write(
+      'Error: --wcag-level needs --wcag, the WCAG version to target. See --help.\n'
+    );
+    process.exitCode = 2;
+    return;
+  }
+
   if (args.baseline && args.writeBaseline) {
     process.stderr.write(
       'Error: --baseline and --write-baseline cannot be used together in the same run. See --help.\n'
@@ -542,7 +616,7 @@ async function runScan(args) {
       url,
       args.context || null,
       buildEngineOptions(args, customRules, packs),
-      null
+      buildRunOnly(args)
     );
   } catch (err) {
     process.stderr.write(`Error: ${describeEngineError(err)}\n`);
