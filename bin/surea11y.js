@@ -57,8 +57,10 @@ Options:
   --rules <ids>           Comma-separated rule IDs to run (only these)
   --exclude-rules <ids>   Comma-separated rule IDs to exclude
   --tags <tags>           Comma-separated tags to run (e.g. wcag2a,wcag2aa)
+  --include-mode <mode>   How --rules and --tags combine: and (default, rules matching both) or or (either)
   --wcag <version>        Run the rules for a WCAG target: 2.0, 2.1 or 2.2, at --wcag-level and below
-  --wcag-level <level>    The --wcag target's level: A, AA (default) or AAA
+  --wcag-level <level>    The --wcag target's level: A, AA (default) or AAA; without --wcag,
+                          the level of the criteria reported, without changing which rules run
   --best-practices        Also run the best-practice rules, which test no WCAG criterion (alone: only those)
   --context <selector>    CSS selector to scope the scan to a subtree
   --custom-rules <path>   Load runtime custom rules from a JS file (repeatable)
@@ -85,6 +87,8 @@ Exit codes:
 Examples:
   surea11y scan ./index.html
   surea11y scan https://example.com/ --wcag 2.2 --wcag-level AA
+  surea11y scan ./index.html --tags forms --rules contrast-computable --include-mode or
+  surea11y scan ./index.html --rules contrast-computable --wcag-level AA
   surea11y scan ./index.html --json > result.json
   surea11y scan ./index.html --write-baseline baseline.json
   surea11y scan ./index.html --baseline baseline.json
@@ -118,6 +122,9 @@ function parseArgs(argv) {
         break;
       case '--tags':
         out.tags = argv[++i];
+        break;
+      case '--include-mode':
+        out.includeMode = argv[++i];
         break;
       case '--context':
         out.context = argv[++i];
@@ -213,7 +220,11 @@ function buildEngineOptions(args, customRules, packs) {
   if (args.locale) engineOptions.locale = args.locale;
   if (args.compact) engineOptions.output = { detail: 'findings' };
   if (customRules && customRules.length) engineOptions.customRules = customRules;
+  // A --wcag target carries its own level; without one, --wcag-level gives
+  // the level of the criteria reported, whichever rules run.
+  if (args.wcagLevel && !args.wcag) engineOptions.wcagLevel = args.wcagLevel;
   if (usesRunOnly(args)) return engineOptions;
+  if (args.includeMode) engineOptions.includeMode = args.includeMode;
   if (args.rules || args.excludeRules) {
     engineOptions.rules = {};
     if (args.rules) engineOptions.rules.include = args.rules;
@@ -245,6 +256,7 @@ function buildRunOnly(args) {
   if (args.rules) runOnly.includeRuleIds = splitList(args.rules);
   if (args.tags) runOnly.tags = splitList(args.tags);
   if (args.excludeRules) runOnly.excludeRuleIds = splitList(args.excludeRules);
+  if (args.includeMode) runOnly.includeMode = args.includeMode;
   return runOnly;
 }
 
@@ -351,7 +363,11 @@ function findScanProblem(result, args) {
   }
 
   if (result && Array.isArray(result.checksResults) && result.checksResults.length === 0) {
-    return 'No rule ran: what --rules, --tags or --wcag include, --exclude-rules excludes, or --rules and --tags have no rule in common. Nothing was checked.';
+    const hint =
+      args.rules && args.tags && args.includeMode !== 'or'
+        ? ' (--include-mode or runs the rules that match either)'
+        : '';
+    return `No rule ran: what --rules, --tags or --wcag include, --exclude-rules excludes, or --rules and --tags have no rule in common${hint}. Nothing was checked.`;
   }
 
   const skippedPacks = (result && result.skippedPacks) || [];
@@ -424,6 +440,9 @@ function printSummary(result, baselineMatch) {
   process.stdout.write(`\nsurea11y scan: ${result.url || '(no url)'}\n`);
   if (result.engine && result.engine.version) {
     process.stdout.write(`  engine: @surea11y/core ${result.engine.version}\n`);
+  }
+  if (result.engine && result.engine.wcagLevel) {
+    process.stdout.write(`  WCAG level reported: ${result.engine.wcagLevel}\n`);
   }
   if (result.engine && result.engine.profile) {
     process.stdout.write(`  profile: ${result.engine.profile}\n`);
@@ -532,9 +551,23 @@ async function runScan(args) {
     return;
   }
 
-  if (args.wcagLevel && !args.wcag) {
+  // Checked here, since without --wcag the engine would only warn and ignore
+  // a level it can't use. Any case is accepted, as the engine accepts it.
+  if (args.wcagLevel !== undefined) {
+    const level = String(args.wcagLevel).toUpperCase();
+    if (!['A', 'AA', 'AAA'].includes(level)) {
+      process.stderr.write(
+        `Error: --wcag-level must be "A", "AA" or "AAA", not "${args.wcagLevel}". See --help.\n`
+      );
+      process.exitCode = 2;
+      return;
+    }
+    args.wcagLevel = level;
+  }
+
+  if (args.includeMode !== undefined && !['and', 'or'].includes(args.includeMode)) {
     process.stderr.write(
-      'Error: --wcag-level needs --wcag, the WCAG version to target. See --help.\n'
+      `Error: --include-mode must be "and" or "or", not "${args.includeMode}". See --help.\n`
     );
     process.exitCode = 2;
     return;

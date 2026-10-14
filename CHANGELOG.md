@@ -2,6 +2,21 @@
 
 All notable changes to this package are documented here. This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Added
+
+- `--include-mode <and|or>` decides how `--rules` and `--tags` combine when both are given: `and`, the default, runs the rules that match both, and `or` those that match either, so `--tags forms --rules contrast-computable --include-mode or` runs every forms rule and the contrast check. Under `and`, those two have no rule in common, and the scan's exit `2` now suggests `--include-mode or`. See [`docs/CLI.md`](./docs/CLI.md#combining---rules-and---tags).
+- `--wcag-level` works without `--wcag`: it sets the level of the criteria the scan reports, without changing which rules run, so `--rules contrast-computable --wcag-level AA` reports 1.4.3 and not the AAA 1.4.6. The summary shows the level as `WCAG level reported`. See [`docs/CLI.md`](./docs/CLI.md#the-level-of-a-scan-that-names-checks).
+
+### Changed
+
+- `--wcag-level` without `--wcag` no longer exits `2`, and the level is accepted in any case (`aa`).
+
+### Requires
+
+- `@surea11y/core` after 1.11.1, for `engineOptions.wcagLevel`; with 1.11.1, `--wcag-level` without `--wcag` changes nothing.
+
 ## 1.2.0
 
 ### Added
