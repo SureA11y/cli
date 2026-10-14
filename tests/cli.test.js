@@ -1043,8 +1043,9 @@ function scanIds(name, args) {
   };
 }
 
-test('CLI: --help lists --wcag, --wcag-level, --best-practices and --compact', () => {
+test('CLI: --help lists --wcag, --wcag-level, --include-mode, --best-practices and --compact', () => {
   const { stdout } = run(['--help']);
+  assert.match(stdout, /--include-mode <mode>/);
   assert.match(stdout, /--wcag <version>/);
   assert.match(stdout, /--wcag-level <level>/);
   assert.match(stdout, /--best-practices/);
@@ -1107,9 +1108,102 @@ test('CLI: an invalid --wcag or --wcag-level, or a level without a version, exit
   assert.equal(level.status, 2);
   assert.match(level.stderr, /Error: --wcag-level must be "A", "AA" or "AAA", not "B"\./);
 
-  const alone = scanIds('wcag-level-alone', ['--wcag-level', 'AA']);
+  const alone = scanIds('wcag-level-alone', ['--wcag-level', 'B']);
   assert.equal(alone.status, 2);
-  assert.match(alone.stderr, /Error: --wcag-level needs --wcag/);
+  assert.match(alone.stderr, /Error: --wcag-level must be "A", "AA" or "AAA", not "B"\./);
+});
+
+// --- --include-mode and --wcag-level without --wcag ---------------------------------
+
+const CONTRAST_PAGE =
+  '<!doctype html><html lang="en"><head><title>T</title></head><body><main><p style="color:#767676;background:#fff">Grey text</p></main></body></html>';
+
+function scanContrastPage(name, args) {
+  const page = path.join(tmpDir, `${name}.html`);
+  fs.writeFileSync(page, CONTRAST_PAGE);
+  const { stdout, stderr, status } = run(['scan', page, ...args, '--json']);
+  const result = stdout ? JSON.parse(stdout) : null;
+  return {
+    status,
+    stderr,
+    result,
+    ids: result ? result.checksResults.map((r) => r.ruleId) : [],
+    rollups: result ? result.rulesResults.map((r) => r.ruleId) : []
+  };
+}
+
+test('CLI: --include-mode or runs the rules --tags select plus the ones --rules name', () => {
+  // contrast-computable carries no forms tag: under the default 'and', the two
+  // have no rule in common and nothing runs, which exits 2 with a hint.
+  const and = scanContrastPage('include-mode-and', [
+    '--tags',
+    'forms',
+    '--rules',
+    'contrast-computable'
+  ]);
+  assert.equal(and.status, 2);
+  assert.match(
+    and.stderr,
+    /no rule in common \(--include-mode or runs the rules that match either\)/
+  );
+
+  const forms = scanContrastPage('include-mode-forms', ['--tags', 'forms']);
+  const or = scanContrastPage('include-mode-or', [
+    '--tags',
+    'forms',
+    '--rules',
+    'contrast-computable',
+    '--include-mode',
+    'or'
+  ]);
+  assert.ok(or.ids.includes('contrast-computable'));
+  assert.equal(or.ids.length, forms.ids.length + 1, 'the forms rules, plus contrast-computable');
+});
+
+test('CLI: --include-mode works beside --wcag too, where the lists go into runOnly', () => {
+  const { ids } = scanContrastPage('include-mode-wcag', [
+    '--best-practices',
+    '--tags',
+    'forms',
+    '--rules',
+    'contrast-computable',
+    '--include-mode',
+    'or'
+  ]);
+  assert.ok(ids.includes('contrast-computable'));
+  assert.ok(ids.includes('region'));
+});
+
+test('CLI: an --include-mode other than and or or exits 2 naming the flag', () => {
+  const { status, stderr } = scanContrastPage('include-mode-bad', [
+    '--tags',
+    'forms',
+    '--include-mode',
+    'xor'
+  ]);
+  assert.equal(status, 2);
+  assert.match(stderr, /Error: --include-mode must be "and" or "or", not "xor"\./);
+});
+
+test('CLI: --wcag-level without --wcag gives the level of the criteria reported, without changing what runs', () => {
+  // contrast-computable checks 1.4.3 (AA) and 1.4.6 (AAA).
+  const every = scanContrastPage('wcag-level-every', ['--rules', 'contrast-computable']);
+  assert.deepEqual(every.rollups, ['wcag-1.4.3-contrast-minimum', 'wcag-1.4.6-contrast-enhanced']);
+
+  const aa = scanContrastPage('wcag-level-aa', [
+    '--rules',
+    'contrast-computable',
+    '--wcag-level',
+    'aa'
+  ]);
+  assert.equal(aa.result.engine.wcagLevel, 'AA');
+  assert.deepEqual(aa.rollups, ['wcag-1.4.3-contrast-minimum']);
+  assert.deepEqual(aa.ids, ['contrast-computable']);
+
+  const page = path.join(tmpDir, 'wcag-level-summary.html');
+  fs.writeFileSync(page, CONTRAST_PAGE);
+  const { stdout } = run(['scan', page, '--rules', 'contrast-computable', '--wcag-level', 'AA']);
+  assert.match(stdout, /WCAG level reported: AA/);
 });
 
 test('CLI: --rules naming no known rule beside --wcag still exits 2 naming the flag', () => {

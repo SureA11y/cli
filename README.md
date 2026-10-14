@@ -80,6 +80,12 @@ surea11y scan ./dist/index.html --wcag 2.2
 # The same, and the best-practice rules, which test no WCAG criterion
 surea11y scan ./dist/index.html --wcag 2.2 --best-practices
 
+# A design-system team's forms check: every forms rule, plus the contrast check
+surea11y scan ./dist/form.html --tags forms --rules contrast-computable --include-mode or
+
+# One check, judged at AA: reports 1.4.3, not the AAA 1.4.6 the same check covers
+surea11y scan ./dist/index.html --rules contrast-computable --wcag-level AA
+
 # Machine-readable output, in full or compact
 surea11y scan ./dist/index.html --json > result.json
 surea11y scan ./dist/index.html --compact --json > result.json

@@ -27,8 +27,9 @@ The CLI reads **static HTML only** — a local file, or the raw response of an H
 | `--rules <ids>` | Comma-separated rule IDs — only run these. |
 | `--exclude-rules <ids>` | Comma-separated rule IDs — never run these. |
 | `--tags <tags>` | Comma-separated tags — e.g. `--tags wcag2a,wcag2aa` for the WCAG 2.0 A and AA criteria, or `--tags best-practice` (see [`WCAG_CONFORMANCE.md`](https://github.com/SureA11y/core/blob/main/docs/WCAG_CONFORMANCE.md)). |
+| `--include-mode <mode>` | How `--rules` and `--tags` combine when both are given: `and` (the default) runs only the rules that match both, `or` those that match either. See [Combining --rules and --tags](#combining---rules-and---tags) below. |
 | `--wcag <version>` | Run the rules for a WCAG conformance target: `2.0`, `2.1` or `2.2`, at `--wcag-level` and below. See [WCAG target and best practices](#wcag-target-and-best-practices) below. |
-| `--wcag-level <level>` | The `--wcag` target's level: `A`, `AA` (the default) or `AAA`. |
+| `--wcag-level <level>` | The `--wcag` target's level: `A`, `AA` (the default) or `AAA`. Without `--wcag`, the level of the criteria the scan reports, without changing which rules run. See [The level of a scan that names checks](#the-level-of-a-scan-that-names-checks) below. |
 | `--best-practices` | Also run the best-practice rules, which test no WCAG criterion (`region`, `heading-order`, ...). On its own, it runs only those. |
 | `--context <selector>` | Scope the scan to one CSS-selected subtree. A selector that matches no element, or that isn't valid CSS, exits `2`: nothing would be scanned. |
 | `--custom-rules <path>` | Load runtime custom rules from a local JS file. Repeatable. See [Custom rules](#custom-rules) below. |
@@ -43,7 +44,7 @@ The CLI reads **static HTML only** — a local file, or the raw response of an H
 | `-h`, `--help` | Show usage. |
 | `-v`, `--version` | Show the installed version of the CLI. `--help` and the summary also name the `@surea11y/core` release that ran the scan, and `--json` has it as `engine.version`. |
 
-These map directly onto `engineOptions`/`runOnly` (see [`ENGINE_OPTIONS.md`](https://github.com/SureA11y/core/blob/main/docs/ENGINE_OPTIONS.md)) — `--rules`/`--exclude-rules` become `engineOptions.rules.include`/`.exclude`, `--tags` becomes `engineOptions.tags.include`, `--profile` and `--pack` become `engineOptions.profile` and `.packs`, and `--compact` becomes `engineOptions.output.detail: 'findings'`. `--wcag` and `--best-practices` become `runOnly.wcag` and `runOnly.bestPractices`; beside either of them, `--rules`, `--exclude-rules` and `--tags` go into `runOnly` too (`includeRuleIds`, `excludeRuleIds`, `tags`), since the engine reads its rule and tag lists from one place or the other.
+These map directly onto `engineOptions`/`runOnly` (see [`ENGINE_OPTIONS.md`](https://github.com/SureA11y/core/blob/main/docs/ENGINE_OPTIONS.md)) — `--rules`/`--exclude-rules` become `engineOptions.rules.include`/`.exclude`, `--tags` becomes `engineOptions.tags.include`, `--profile` and `--pack` become `engineOptions.profile` and `.packs`, and `--compact` becomes `engineOptions.output.detail: 'findings'`, `--include-mode` becomes `engineOptions.includeMode`, and `--wcag-level` without `--wcag` becomes `engineOptions.wcagLevel`. `--wcag` and `--best-practices` become `runOnly.wcag` and `runOnly.bestPractices`; beside either of them, `--rules`, `--exclude-rules`, `--tags` and `--include-mode` go into `runOnly` too (`includeRuleIds`, `excludeRuleIds`, `tags`, `includeMode`), since the engine reads its rule and tag lists from one place or the other.
 
 A `--rules` or `--tags` list in which nothing names a known rule or tag exits `2` (for example `--tags wcag2.2aa`, where the tag is `wcag22aa`): run as given, it would check nothing and pass. An unknown entry beside known ones is ignored with a warning on stderr, as is an unknown `--exclude-rules` entry. A selection whose parts all name rules but cancel each other, an include that `--exclude-rules` takes away or `--rules` and `--tags` with no rule in common, runs no rule and exits `2` too.
 
@@ -57,9 +58,29 @@ surea11y scan ./dist/index.html --wcag 2.1 --wcag-level A     # WCAG 2.1, Level 
 surea11y scan ./dist/index.html --wcag 2.2 --best-practices   # and the best practices
 ```
 
-4.1.1 Parsing, which WCAG 2.2 removed, is part of a `2.1` target and not of a `2.2` one. `--best-practices` adds the rules that name no WCAG criterion; a finding from one is good practice, not a WCAG failure, and no WCAG rollup counts it. `--rules` and `--tags` add to a target's rules, and `--exclude-rules` applies after. Beside `--profile`, `--best-practices` adds its rules and the profile still applies; `--wcag`, `--rules` and `--tags` choose the rules in a profile's place, so `--profile` with any of them exits `2`. A version other than `2.0`, `2.1` or `2.2`, a level other than `A`, `AA` or `AAA`, or `--wcag-level` without `--wcag` exits `2`.
+4.1.1 Parsing, which WCAG 2.2 removed, is part of a `2.1` target and not of a `2.2` one. `--best-practices` adds the rules that name no WCAG criterion; a finding from one is good practice, not a WCAG failure, and no WCAG rollup counts it. `--rules` and `--tags` add to a target's rules, and `--exclude-rules` applies after. Beside `--profile`, `--best-practices` adds its rules and the profile still applies; `--wcag`, `--rules` and `--tags` choose the rules in a profile's place, so `--profile` with any of them exits `2`. A version other than `2.0`, `2.1` or `2.2` or a level other than `A`, `AA` or `AAA` exits `2`. `--wcag-level` on its own sets the level of the criteria reported; see [The level of a scan that names checks](#the-level-of-a-scan-that-names-checks).
 
 `--tags` still selects by the tags rules carry, as before; see [`WCAG_CONFORMANCE.md`](https://github.com/SureA11y/core/blob/main/docs/WCAG_CONFORMANCE.md) for the tag sets.
+
+## Combining --rules and --tags
+
+Given both, `--rules` and `--tags` select the rules that match both by default, which is right for narrowing a tag set down to a few of its rules. To say "this area, plus these checks" instead, pass `--include-mode or`, which runs the rules that match either. A team that owns a design system's form components, say, can check every rule about forms and the contrast check too, in one CI step:
+
+```sh
+surea11y scan ./dist/form.html --tags forms --rules contrast-computable --include-mode or
+```
+
+Without `--include-mode or`, that scan runs no rule, since `contrast-computable` isn't tagged `forms`, and it exits `2` with a hint to use it: a scan of no rules would otherwise pass. The same holds for a WCAG level tag beside a best practice: `--tags wcag2a --rules region`. It works beside `--wcag` and `--best-practices` too. A mode other than `and` or `or` exits `2`. A `--wcag` target doesn't need it: its rules are always added to what `--rules` and `--tags` select.
+
+## The level of a scan that names checks
+
+A scan that names checks rather than a target reports the WCAG criteria those checks belong to, at every level. `contrast-computable` checks 1.4.3 (AA) and 1.4.6 (AAA), so a scan of it alone reports both, and a site that meets AA can show a failing AAA criterion it never aimed for. Without `--wcag`, `--wcag-level` gives the level of the criteria reported, without changing which rules run:
+
+```sh
+surea11y scan ./dist/index.html --rules contrast-computable --wcag-level AA
+```
+
+This reports 1.4.3 alone; `contrast-computable` still runs and reports. The summary says `WCAG level reported: AA`, and `--json` has it as `engine.wcagLevel`. It applies to any scan without `--wcag`: on a full scan, a `--tags` selection or a `--profile`, criteria above the level are left out of the report while their checks still run. Any case is accepted (`aa`); a level other than `A`, `AA` or `AAA` exits `2`. Needs the `@surea11y/core` release after 1.11.1.
 
 ## Exit codes
 
