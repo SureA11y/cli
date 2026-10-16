@@ -406,7 +406,66 @@ function findScanProblem(result, args) {
   return null;
 }
 
-function printSummary(result, baselineMatch) {
+// The WCAG criterion a rollup decides, from its normative mapping, or null
+// for anything else (a pack's standard or checklist item).
+function wcagCriterion(rollup) {
+  const mappings =
+    rollup && rollup.meta && Array.isArray(rollup.meta.normativeMappings)
+      ? rollup.meta.normativeMappings
+      : [];
+  const wcag = mappings.find((m) => m && m.standard === 'WCAG' && m.requirement);
+  if (!wcag || (rollup.meta && rollup.meta.standard)) return null;
+  return wcag.requirement;
+}
+
+// Prints the WCAG criteria the scan reports, grouped by outcome, fail first.
+// A criterion some of whose checks the scan didn't select is marked as
+// partly checked. With compact, only the counts. Nothing here is a
+// conformance claim, and the last line says so.
+function printCriteria(result, { compact = false } = {}) {
+  const rollups = (Array.isArray(result.rulesResults) ? result.rulesResults : [])
+    .map((r) => ({ rollup: r, criterion: wcagCriterion(r) }))
+    .filter((e) => e.criterion);
+  if (!rollups.length) return;
+
+  const engine = result.engine || {};
+  const target = ['WCAG', engine.wcagVersion, engine.wcagLevel].filter(Boolean).join(' ');
+  const order = ['fail', 'cantTell', 'pass', 'notApplicable'];
+  const groups = {};
+  for (const e of rollups) (groups[e.rollup.outcome] = groups[e.rollup.outcome] || []).push(e);
+  const byNumber = (a, b) => a.criterion.localeCompare(b.criterion, 'en', { numeric: true });
+
+  process.stdout.write(`criteria (${target}):\n`);
+  if (compact) {
+    process.stdout.write(
+      `  ${order
+        .filter((o) => groups[o])
+        .map((o) => `${o}: ${groups[o].length}`)
+        .join('   ')}\n`
+    );
+  } else {
+    for (const outcome of order.slice(0, 3)) {
+      if (!groups[outcome]) continue;
+      const names = groups[outcome].sort(byNumber).map(({ rollup, criterion }) => {
+        const contributors =
+          (rollup.data && rollup.data.details && rollup.data.details.contributors) || [];
+        const notSelected = contributors.filter((c) => c && c.notSelected).length;
+        const partly = notSelected
+          ? ` (partly checked: ${notSelected} of ${contributors.length} checks not selected)`
+          : '';
+        return `${criterion} ${rollup.title || rollup.ruleId}${partly}`;
+      });
+      process.stdout.write(`  ${outcome.padEnd(10)} ${names.join('; ')}\n`);
+    }
+    if (groups.notApplicable)
+      process.stdout.write(`  notApplicable: ${groups.notApplicable.length}\n`);
+  }
+  process.stdout.write(
+    '  A criterion that passes here means the checks that ran found nothing in it, not that the page conforms.\n\n'
+  );
+}
+
+function printSummary(result, baselineMatch, { compact = false } = {}) {
   function getOccurrenceOutcome(ruleResult, occurrence) {
     const occurrenceOutcome =
       occurrence &&
@@ -494,6 +553,8 @@ function printSummary(result, baselineMatch) {
       `cantTell — needs human review (${cantTells.length} rule(s)): ${cantTells.join(', ')}\n\n`
     );
   }
+
+  printCriteria(result, { compact });
 
   if (baselineMatch) {
     process.stdout.write(
@@ -713,7 +774,7 @@ async function runScan(args) {
         ) + '\n'
       );
     } else {
-      printSummary(result);
+      printSummary(result, undefined, { compact: args.compact });
     }
     process.stderr.write(
       `Wrote ${entries.length} occurrence(s) to baseline: ${args.writeBaseline}\n`
@@ -730,7 +791,7 @@ async function runScan(args) {
         JSON.stringify({ ...result, baseline: { mode: 'check', ...match } }, null, 2) + '\n'
       );
     } else {
-      printSummary(result, match);
+      printSummary(result, match, { compact: args.compact });
     }
     process.exitCode = match.newCount > 0 ? 1 : 0;
     return;
@@ -739,7 +800,7 @@ async function runScan(args) {
   if (args.json) {
     process.stdout.write(JSON.stringify(result, null, 2) + '\n');
   } else {
-    printSummary(result);
+    printSummary(result, undefined, { compact: args.compact });
   }
 
   const hasFail = result.checksResults.some((r) => r.outcome === 'fail');

@@ -22,7 +22,7 @@ Requires Node.js `^20.19.0 || ^22.13.0 || >=24.0.0`.
 $ surea11y scan ./index.html
 
 surea11y scan: file:///path/to/index.html
-  engine: @surea11y/core 1.11.1
+  engine: @surea11y/core 1.12.0
   pass: 15   fail: 4   cantTell: 4   notApplicable: 111
 
   occurrences by tier: fail: 4   cantTell: 5
@@ -59,7 +59,20 @@ FAIL (4 rule(s)):
 
 cantTell — needs human review (4 rule(s)): contrast-computable, link-name-quality,
 manual-review, page-title-patterns
+
+criteria (WCAG 2.2):
+  fail       1.1.1 Non-text content: text alternatives; 1.4.3 Contrast: minimum;
+             1.4.6 Contrast: enhanced; 4.1.2 Name, role, value: accessible name
+  cantTell   2.1.1 Keyboard; 2.4.2 Page titled; 2.4.3 Focus order; 2.4.4 Link
+             Purpose (In Context); 2.4.7 Focus visible; 2.4.9 Link Purpose (Link Only)
+  pass       1.3.1 Info and Relationships; 2.2.2 Pause, Stop, Hide; 2.4.1 Bypass
+             Blocks; 3.1.1 Language of page; 4.1.2 Name, role, value: ARIA validity
+  notApplicable: 19
+  A criterion that passes here means the checks that ran found nothing in it, not
+  that the page conforms.
 ```
+
+The `criteria` block reads the same scan by WCAG criterion, the way people usually ask ("does it fail 1.4.3?"). A criterion that only some of its checks decided, because the scan selected the others out (`--rules`, `--tags`), is marked `(partly checked: 1 of 2 checks not selected)`. `--compact` shows the block as counts. A passing criterion means the checks that ran found nothing, not that the page meets it: most criteria need a person to check them.
 
 That last line is the point of the engine: rules that *cannot* be settled from static markup are reported as `cantTell` and routed to a human, instead of being silently dropped or guessed at. `cantTell` never affects the exit code.
 

@@ -2,10 +2,13 @@
 
 All notable changes to this package are documented here. This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## 1.3.0
+
+Requires `@surea11y/core` 1.12.0.
 
 ### Added
 
+- The summary lists the WCAG criteria the scan reports, grouped by outcome (`fail`, then `cantTell`, then `pass`, and a count of `notApplicable`), under the target the scan used, and marks a criterion the scan only partly checked, such as 1.4.3 under `--rules contrast-computable`. `--compact` shows counts only. A closing line says a passing criterion is not a conformance claim. The exit code and the `--json`, `--sarif`, `--junit` and `--html` outputs are unchanged. See [`docs/CLI.md`](./docs/CLI.md#criteria-in-the-summary).
 - `--include-mode <and|or>` decides how `--rules` and `--tags` combine when both are given: `and`, the default, runs the rules that match both, and `or` those that match either, so `--tags forms --rules contrast-computable --include-mode or` runs every forms rule and the contrast check. Under `and`, those two have no rule in common, and the scan's exit `2` now suggests `--include-mode or`. See [`docs/CLI.md`](./docs/CLI.md#combining---rules-and---tags).
 - `--wcag-level` works without `--wcag`: it sets the level of the criteria the scan reports, without changing which rules run, so `--rules contrast-computable --wcag-level AA` reports 1.4.3 and not the AAA 1.4.6. The summary shows the level as `WCAG level reported`. See [`docs/CLI.md`](./docs/CLI.md#the-level-of-a-scan-that-names-checks).
 
@@ -13,9 +16,16 @@ All notable changes to this package are documented here. This project adheres to
 
 - `--wcag-level` without `--wcag` no longer exits `2`, and the level is accepted in any case (`aa`).
 
-### Requires
+### What changes with `@surea11y/core` 1.12
 
-- `@surea11y/core` after 1.11.1, for `engineOptions.wcagLevel`; with 1.11.1, `--wcag-level` without `--wcag` changes nothing.
+The CLI passes your options to the engine, so these show in scans without a change of their own:
+
+- **An empty heading fails a scan with no selection.** `empty-heading`, a best practice, now fails a heading with no accessible name, where it asked about one, so `surea11y scan page.html` exits `1` on a page with `<h2></h2>`. `--wcag`, `--tags` and `--profile` scans don't run it.
+- **`--rules`, non-WCAG `--tags` and `--best-practices` scans report their criteria.** `rulesResults` holds the criteria those rules belong to, so `--junit` has a suite per criterion where it had only "Other checks", and `--html` shows a criterion whose other checks weren't selected as "Partly checked".
+- **JUnit suite names are the same in every locale** (`WCAG 4.1.2`); the title moves to the suite's `title` property. A CI dashboard that tracks tests by suite name shows them once as new.
+- **SARIF:** a passing contrast rule writes no `note`, `artifactLocation.uri` is always a valid URI (a path with a space is percent-encoded), and a finding in a shadow tree is located through its hosts.
+- **Four rules count towards more criteria**, as W3C's ACT rules map them: `input-image-alt-present` adds 4.1.2, `aria-roles-valid` 1.3.1, `link-name-present` 2.4.9 (AAA), and `meta-refresh-timing-absent` 2.2.4 and 3.2.5 (AAA).
+- **A rule id in another case** (`--rules IMG-ALT-PRESENT`) selects the rule, where it exited `2`.
 
 ## 1.2.0
 
