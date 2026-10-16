@@ -1280,3 +1280,98 @@ test('CLI: a rule selection that cancels itself out exits 2 rather than passing'
   assert.deepEqual(ids, []);
   assert.match(stderr, /Error: No rule ran: .*Nothing was checked\./);
 });
+
+// --- core 1.12: criteria in the terminal, and the level of the criteria reported ------
+
+const CRITERIA_PAGE =
+  '<!doctype html><html lang="en"><head><title>T</title></head><body><main><h1>Hi</h1><img src="a.png"><p style="color:#999;background:#fff">Grey text</p><button></button></main></body></html>';
+
+function scanCriteriaPage(name, args) {
+  const page = path.join(tmpDir, `${name}.html`);
+  fs.writeFileSync(page, CRITERIA_PAGE);
+  return run(['scan', page, ...args]);
+}
+
+function criteriaBlock(stdout) {
+  const start = stdout.indexOf('criteria (');
+  return start === -1 ? '' : stdout.slice(start, stdout.indexOf('\n\n', start));
+}
+
+test('CLI: the summary lists the WCAG criteria by outcome, fail before cantTell before pass, and says passing is no conformance claim', () => {
+  const { stdout } = scanCriteriaPage('criteria-wcag', ['--wcag', '2.2']);
+  const block = criteriaBlock(stdout);
+  assert.match(block, /^criteria \(WCAG 2\.2 AA\):\n/);
+  const at = (label) => block.search(new RegExp(`\\n  ${label} +\\S`));
+  assert.ok(at('fail') > 0 && at('fail') < at('cantTell') && at('cantTell') < at('pass'), block);
+  assert.match(block, /\n {2}fail +1\.1\.1 [^\n]*1\.4\.3 /);
+  assert.match(block, /\n {2}notApplicable: \d+\n/);
+  assert.match(block, /not that the page conforms\.$/);
+});
+
+test('CLI: a --rules scan at --wcag-level AA lists 1.4.3 as partly checked, and no 1.4.6', () => {
+  const { stdout } = scanCriteriaPage('criteria-rules', [
+    '--rules',
+    'contrast-computable',
+    '--wcag-level',
+    'AA'
+  ]);
+  const block = criteriaBlock(stdout);
+  assert.match(block, /1\.4\.3 [^\n]*\(partly checked: 1 of 2 checks not selected\)/);
+  assert.doesNotMatch(block, /1\.4\.6/);
+});
+
+test('CLI: --compact shows the criteria as counts, and --json carries no summary', () => {
+  const compact = scanCriteriaPage('criteria-compact', ['--wcag', '2.2', '--compact']);
+  assert.match(
+    criteriaBlock(compact.stdout),
+    /\n {2}fail: \d+ {3}cantTell: \d+ {3}pass: \d+ {3}notApplicable: \d+\n/
+  );
+
+  const json = scanCriteriaPage('criteria-json', ['--wcag', '2.2', '--json']);
+  assert.doesNotMatch(json.stdout, /criteria \(/);
+  assert.ok(Array.isArray(JSON.parse(json.stdout).rulesResults));
+});
+
+test('CLI: --rules contrast-computable --wcag-level AA writes a JUnit suite for 1.4.3 and none for 1.4.6', () => {
+  const junitPath = path.join(tmpDir, 'criteria-junit.xml');
+  const { status } = scanCriteriaPage('criteria-junit', [
+    '--rules',
+    'contrast-computable',
+    '--wcag-level',
+    'aa',
+    '--junit',
+    junitPath
+  ]);
+  assert.equal(status, 0, 'the scan has questions, not failures');
+  const xml = fs.readFileSync(junitPath, 'utf8');
+  assert.match(xml, /<testsuite[^>]* name="WCAG 1\.4\.3"/);
+  assert.doesNotMatch(xml, /name="WCAG 1\.4\.6"/);
+});
+
+test('CLI: --wcag-level AAAA exits 2 naming the flag', () => {
+  const { status, stderr } = scanCriteriaPage('criteria-level-bad', [
+    '--rules',
+    'contrast-computable',
+    '--wcag-level',
+    'AAAA'
+  ]);
+  assert.equal(status, 2);
+  assert.match(stderr, /Error: --wcag-level must be "A", "AA" or "AAA", not "AAAA"\./);
+});
+
+test('CLI: an empty heading fails a scan with no selection, and not a --wcag one', () => {
+  const page = path.join(tmpDir, 'empty-heading.html');
+  fs.writeFileSync(
+    page,
+    '<!doctype html><html lang="en"><head><title>T</title></head><body><main><h1>Hi</h1><h2></h2></main></body></html>'
+  );
+  const unscoped = run(['scan', page, '--json']);
+  const failed = JSON.parse(unscoped.stdout)
+    .checksResults.filter((r) => r.outcome === 'fail')
+    .map((r) => r.ruleId);
+  assert.ok(failed.includes('empty-heading'), JSON.stringify(failed));
+  assert.equal(unscoped.status, 1);
+
+  const wcag = run(['scan', page, '--wcag', '2.2', '--json']);
+  assert.ok(!JSON.parse(wcag.stdout).checksResults.some((r) => r.ruleId === 'empty-heading'));
+});

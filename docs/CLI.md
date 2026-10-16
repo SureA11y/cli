@@ -80,7 +80,22 @@ A scan that names checks rather than a target reports the WCAG criteria those ch
 surea11y scan ./dist/index.html --rules contrast-computable --wcag-level AA
 ```
 
-This reports 1.4.3 alone; `contrast-computable` still runs and reports. The summary says `WCAG level reported: AA`, and `--json` has it as `engine.wcagLevel`. It applies to any scan without `--wcag`: on a full scan, a `--tags` selection or a `--profile`, criteria above the level are left out of the report while their checks still run. Any case is accepted (`aa`); a level other than `A`, `AA` or `AAA` exits `2`. Needs the `@surea11y/core` release after 1.11.1.
+This reports 1.4.3 alone; `contrast-computable` still runs and reports. The summary says `WCAG level reported: AA`, and `--json` has it as `engine.wcagLevel`. It applies to any scan without `--wcag`: on a full scan, a `--tags` selection or a `--profile`, criteria above the level are left out of the report while their checks still run. Any case is accepted (`aa`); a level other than `A`, `AA` or `AAA` exits `2`. `--junit` and `--sarif` follow the level too: the scan above writes a `WCAG 1.4.3` JUnit suite and no `WCAG 1.4.6`. Needs `@surea11y/core` 1.12.0 or later.
+
+## Criteria in the summary
+
+After the rules, the summary lists the WCAG criteria the scan reports, grouped by outcome, `fail` first:
+
+```
+criteria (WCAG 2.2 AA):
+  fail       1.1.1 Non-text content: text alternatives
+  cantTell   1.4.3 Contrast: minimum (partly checked: 1 of 2 checks not selected)
+  pass       2.4.2 Page titled
+  notApplicable: 15
+  A criterion that passes here means the checks that ran found nothing in it, not that the page conforms.
+```
+
+The heading names the target from the scan (`--wcag`, `--wcag-level`, or what a profile implies). A criterion is *partly checked* when the scan selected some of its checks out, as `--rules contrast-computable` does for 1.4.3, whose other check is `contrast-minimum`: its outcome covers only the checks that ran. `notApplicable` criteria are counted, not listed, and `--compact` shows the whole block as counts. Titles follow `--locale`. A pack's own checklist items are left out of the block; the HTML report shows them. The block never changes the exit code, and `--json` has the same data in `rulesResults`.
 
 ## Exit codes
 
@@ -191,7 +206,8 @@ npx surea11y scan ./page.html --pack ./acme-policy-pack.js --profile acme-web-20
 
 ```
 surea11y scan: file:///path/to/page.html
-  engine: @surea11y/core 1.11.1
+  engine: @surea11y/core 1.12.0
+  WCAG level reported: AA
   profile: acme-web-2026
   packs: @acme/a11y-policy@1.0.0
   pass: 7   fail: 2   cantTell: 6   notApplicable: 91
@@ -211,6 +227,13 @@ FAIL (2 rule(s)):
       hint: Add an alt attribute that says what the image shows, or alt="" if the image is purely decorative.
 
 cantTell — needs human review (6 rule(s)): contrast-computable, manual-review, media-alternative-transcript-evidence, no-autoplay-audio, page-title-patterns, video-caption
+
+criteria (WCAG 2.2 AA):
+  fail       1.1.1 Non-text content: text alternatives
+  cantTell   1.2.1 Audio-only and video-only (prerecorded): transcript; 1.2.2 Captions (Prerecorded); 1.4.2 Audio Control; 1.4.3 Contrast: minimum; 2.1.1 Keyboard; 2.4.2 Page titled; 2.4.3 Focus order; 2.4.7 Focus visible
+  pass       1.3.1 Info and Relationships; 2.2.2 Pause, Stop, Hide; 2.4.1 Bypass Blocks; 3.1.1 Language of page; 4.1.2 Name, role, value: accessible name
+  notApplicable: 15
+  A criterion that passes here means the checks that ran found nothing in it, not that the page conforms.
 ```
 
 The pack's own rules appear like core's, with ids that start with its namespace (`acme-no-autoplay`). The checklist's items (`acme-images`, `acme-media`) are in `--json`'s `rulesResults`, each one result, and the HTML, SARIF and JUnit reports list them. For a pack of your own, `npx surea11y-pack new <folder>` (from `@surea11y/core`) writes a package that works as generated, with its tests, docs and lint.
@@ -293,7 +316,7 @@ For CI systems that show JUnit XML in their own test views (GitLab's merge reque
 surea11y scan ./dist/index.html --junit a11y.junit.xml
 ```
 
-Each WCAG criterion becomes a test suite and each rule a test case: a `fail` rule is a failing test, a `cantTell` rule a skipped one (it needs human review, so it never turns the report red), and `notApplicable` rules are left out. With `--baseline`, a rule whose every failure is already recorded in the baseline is reported as skipped, not failing. The report never changes the exit code. See [`JUNIT.md`](https://github.com/SureA11y/core/blob/main/docs/JUNIT.md) for the full mapping.
+Each WCAG criterion becomes a test suite, named `WCAG 1.4.3` in every locale (the translated title is the suite's `title` property), and each rule a test case: a `fail` rule is a failing test, a `cantTell` rule a skipped one (it needs human review, so it never turns the report red), and `notApplicable` rules are left out. With `--baseline`, a rule whose every failure is already recorded in the baseline is reported as skipped, not failing. A `--rules` or `--tags` scan has a suite for each criterion its rules belong to. With `--wcag-level`, criteria above the level get no suite. The report never changes the exit code. See [`JUNIT.md`](https://github.com/SureA11y/core/blob/main/docs/JUNIT.md) for the full mapping.
 
 For example, in GitLab CI:
 
