@@ -1263,9 +1263,11 @@ test('CLI: the pack example in docs/CLI.md prints the output it shows', () => {
     { cwd: project }
   );
   assert.equal(status, 1);
+  // The doc names the core it was written against; any later core prints its own.
+  const anyCore = (text) => text.replace(/(engine: @surea11y\/core )\S+/, '$1x.y.z');
   assert.equal(
-    stdout.replace(/file:\/\/\S*\/page\.html/, 'file:///path/to/page.html').trim(),
-    expected.trim()
+    anyCore(stdout.replace(/file:\/\/\S*\/page\.html/, 'file:///path/to/page.html')).trim(),
+    anyCore(expected).trim()
   );
 });
 
