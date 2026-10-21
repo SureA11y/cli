@@ -22,7 +22,7 @@ Requires Node.js `^20.19.0 || ^22.13.0 || >=24.0.0`.
 $ surea11y scan ./index.html
 
 surea11y scan: file:///path/to/index.html
-  engine: @surea11y/core 1.12.0
+  engine: @surea11y/core 1.13.1
   pass: 15   fail: 4   cantTell: 4   notApplicable: 111
 
   occurrences by tier: fail: 4   cantTell: 5
