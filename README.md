@@ -5,6 +5,8 @@ Command-line WCAG 2.2 accessibility scanner for static HTML, or rendered pages w
 ```sh
 npx @surea11y/cli scan ./index.html
 npx @surea11y/cli scan https://example.com/ --wcag 2.2
+npx @surea11y/cli scan ./dist/index.html ./dist/pricing.html --fail-on-severity serious
+npx @surea11y/cli scan https://app.example.com/ --browser
 ```
 
 ## Install
@@ -78,6 +80,59 @@ That last line is the point of the engine: rules that *cannot* be settled from s
 
 Exit code `0` = clean, `1` = at least one `fail` on some page (the CI-gating case; `--fail-on-severity serious` counts only serious and critical ones), `2` = usage error or the scan couldn't run, including a scan that would have checked nothing or less than asked (a `--rules`/`--tags` typo, a `--context` selector that matches nothing, a custom rule or a pack that didn't run, a `--profile` that wasn't applied).
 
+## Several pages, a severity gate, a real browser
+
+**Several pages.** Name them, or list them in a file, one per line:
+
+```sh
+surea11y scan ./dist/index.html ./dist/pricing.html
+surea11y scan --urls pages.txt
+```
+
+```text
+# pages.txt
+./dist/index.html
+./dist/pricing.html   # the plans table
+https://staging.example.com/account
+```
+
+Each page gets its own section of the summary, and a last line counts the pages with failures. The run fails when any page does. `--json` prints an array, `--sarif` and `--junit` write one file covering every page, `--html` writes one report per page, and a baseline remembers which page each known failure was on.
+
+**A severity gate.** Every failure is still reported; only those at the level or above fail the run:
+
+```
+$ surea11y scan --urls pages.txt --fail-on-severity serious
+
+...
+FAIL (2 rule(s)):
+
+  img-alt-present  (serious, 1 fail occurrence(s))
+    - html > body > main > img
+      This <img> has no alt attribute.
+      hint: Add an alt attribute that says what the image shows, or alt="" if
+      the image is purely decorative.
+
+  empty-heading  (minor, 1 fail occurrence(s); below --fail-on-severity serious,
+  does not fail the run)
+    - html > body > main > h2
+      This heading has no accessible name.
+...
+
+2 pages scanned: 1 with failures at serious or above.
+```
+
+Failing rules are listed most severe first. With `--baseline`, only *new* failures at the level count, so a team can start by blocking on serious problems and tighten the gate as the backlog shrinks.
+
+**A real browser.** For a page whose content its JavaScript renders, install Playwright in your project and add `--browser`:
+
+```sh
+npm install --save-dev playwright
+npx playwright install chromium
+surea11y scan https://app.example.com/ https://app.example.com/settings --browser
+```
+
+Each page opens in headless Chromium, its scripts run, and the scan sees what renders, with a real layout for the rules that measure it. The engine is the same `@surea11y/core` the static scan uses. Every option works with it, reports, baselines, packs and custom rules included.
+
 ## What it can and can't scan
 
 By default the CLI reads **static HTML** — a local file, or the raw body of an HTTP(S) GET — and never executes page JavaScript. Client-rendered content won't be captured, and geometry-dependent rules report `notApplicable` (there's no real CSS layout under jsdom).
@@ -89,6 +144,12 @@ With `--browser` (and Playwright installed in your project), it opens each page 
 ```sh
 # Target a WCAG version and level (AA unless --wcag-level says otherwise)
 surea11y scan ./dist/index.html --wcag 2.2
+
+# A whole site in one run, failing only on serious and critical problems
+surea11y scan --urls pages.txt --fail-on-severity serious
+
+# A client-rendered app, as its scripts render it (needs playwright installed)
+surea11y scan https://app.example.com/ --browser
 
 # The same, and the best-practice rules, which test no WCAG criterion
 surea11y scan ./dist/index.html --wcag 2.2 --best-practices
@@ -109,6 +170,9 @@ surea11y scan ./dist/index.html --baseline baseline.json         # in CI, from t
 
 # Browsable HTML report, and SARIF for GitHub Code Scanning
 surea11y scan ./dist/index.html --html report.html --sarif results.sarif
+
+# Several pages: one SARIF and one JUnit file, an HTML report per page
+surea11y scan --urls pages.txt --sarif results.sarif --junit a11y.junit.xml --html report.html
 
 # JUnit XML for the test views of GitLab, Azure DevOps, Jenkins and CircleCI
 surea11y scan ./dist/index.html --junit a11y.junit.xml
@@ -138,6 +202,17 @@ A marketing site built to static HTML. The CI step is one shell line; there's no
 
 The scan exits `1` if anything fails, which fails the step. You wrote no JavaScript, so you needed the command.
 
+The same goes for a single-page app whose pages its JavaScript renders, as long as nobody has to click to get there:
+
+```yaml
+# playwright is in the project's devDependencies; a11y-pages.txt lists
+# http://localhost:4173/, http://localhost:4173/settings, ...
+- run: npm ci && npx playwright install --with-deps chromium
+- run: npm run build
+- run: npx serve -s dist -l 4173 & npx wait-on http://localhost:4173
+- run: npx @surea11y/cli scan --urls a11y-pages.txt --browser --fail-on-severity serious --sarif a11y.sarif
+```
+
 ### You don't
 
 A dashboard whose chart only exists after you click "Load report". You're already writing a Playwright test, so call the engine directly:
@@ -164,7 +239,7 @@ It isn't local vs. CI — both examples are CI. It's:
 - **Does it appear once the page's JavaScript has run, with no one touching it?** The CLI with `--browser` works: a client-rendered app's pages, scanned as they load.
 - **Does it only appear after someone clicks, types or logs in?** You need to drive the browser, so you need the library or a binding.
 
-That second case is why "use the CLI for pipelines" is a misleading shorthand — plenty of pipelines are the second example.
+That last case is why "use the CLI for pipelines" is a misleading shorthand — plenty of pipelines are the dashboard example.
 
 Either way you're running the same engine. [`@surea11y/core`](https://github.com/SureA11y/core) has **zero runtime dependencies** and evaluates whatever DOM you hand it, so if you already have a browser or a jsdom instance, you don't pay for `jsdom` twice. This package is the one that brings `jsdom` along, because turning fetched HTML into a DOM is what a CLI has to do. Splitting the two is what keeps that promise true.
 
