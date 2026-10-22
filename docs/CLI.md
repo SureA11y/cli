@@ -29,6 +29,10 @@ With `--browser`, it opens each page in headless Chromium instead, runs its scri
 | `<file-or-url>...` | The pages to scan: one or more local files or HTTP(S) URLs. See [Several pages](#several-pages) below. |
 | `--urls <file>` | Also scan each path or URL listed in `<file>`, one per line; blank lines and `#` comments are skipped. |
 | `--browser` | Scan each page in headless Chromium, running its scripts, through Playwright, which you install. See [In a real browser](#in-a-real-browser) below. |
+| `--wait-for <selector>` | With `--browser`: wait until an element matching `<selector>` is on the page and shown, then scan. See [Waiting for content](#waiting-for-content) below. |
+| `--wait-timeout <ms>` | With `--wait-for`: how long to wait, in milliseconds (default `30000`). |
+| `--width <px>` | With `--browser`: the viewport width (default `1280`; `320` lays the page out at the width WCAG 1.4.10 Reflow uses). See [Width and color scheme](#width-and-color-scheme) below. |
+| `--color-scheme <light\|dark>` | With `--browser`: emulate the user's light or dark color scheme (`prefers-color-scheme`). |
 | `--fail-on-severity <severity>` | Exit `1` only for a failing rule of this severity or above: `critical`, `serious`, `moderate` or `minor`. Every failure is still reported. See [Failing only on serious problems](#failing-only-on-serious-problems) below. |
 | `--json` | Print the raw result object (see [`OUTPUT_SCHEMA.md`](https://github.com/SureA11y/core/blob/main/docs/OUTPUT_SCHEMA.md)) instead of a human-readable summary; for several pages, an array of them. |
 | `--locale <locale>` | Output text locale (default `en`) — see [`I18N.md`](https://github.com/SureA11y/core/blob/main/docs/I18N.md). |
@@ -111,7 +115,7 @@ The heading names the target from the scan (`--wcag`, `--wcag-level`, or what a 
 |---|---|
 | `0` | Scan completed, no `fail` outcomes on any page (none at or above `--fail-on-severity`'s level, when given). |
 | `1` | Scan completed, at least one `fail` outcome on some page (at or above `--fail-on-severity`'s level, when given) — the CI-gating case. |
-| `2` | Usage error, or the scan itself couldn't run (bad path/URL, network failure, missing `jsdom`, `--browser` without Playwright or Chromium, a `--urls` file that can't be read or lists nothing), or it would have checked nothing or less than asked: a `--rules`/`--tags` list naming no known rule or tag, a selection whose parts cancel out so that no rule runs (`--rules img-alt-present --exclude-rules img-alt-present`), a `--context` selector that is invalid or matches no element, a custom rule the engine could not run, a pack that can't be found or loaded or that the engine skipped, or a `--profile` that wasn't applied. No report or baseline is written. |
+| `2` | Usage error, or the scan itself couldn't run (bad path/URL, network failure, missing `jsdom`, `--browser` without Playwright or Chromium, a `--urls` file that can't be read or lists nothing, a `--wait-for` element that never showed, a browser-only option without `--browser`), or it would have checked nothing or less than asked: a `--rules`/`--tags` list naming no known rule or tag, a selection whose parts cancel out so that no rule runs (`--rules img-alt-present --exclude-rules img-alt-present`), a `--context` selector that is invalid or matches no element, a custom rule the engine could not run, a pack that can't be found or loaded or that the engine skipped, or a `--profile` that wasn't applied. No report or baseline is written. |
 
 `cantTell` outcomes never affect the exit code — they're printed as a "needs human review" summary, consistent with the manual/`cantTell` mental model in [`TROUBLESHOOTING.md`](https://github.com/SureA11y/core/blob/main/docs/TROUBLESHOOTING.md#should-i-treat-canttell-as-a-failure). If you need `cantTell`-aware gating, use `--json` and inspect `checksResults` yourself, or call the library directly (see [`INTEGRATION.md`](https://github.com/SureA11y/core/blob/main/docs/INTEGRATION.md#ci-gating-a-build-on-the-result)).
 
@@ -167,6 +171,29 @@ surea11y scan https://app.example.com/ --browser
 - Every option works as in a static scan, packs and custom rules included: packs are loaded into the page as core's `packScript`, and custom rules as their source.
 - The engine is loaded by evaluating it, not with a script tag, so a page whose Content Security Policy forbids inline scripts is still scanned. A custom rule given as a function is passed as source and needs `eval`, which such a policy may forbid; the engine then skips it and says so, and the run exits `2`.
 - Only the top document is scanned; frames inside it are not, for now. For more control over the browser (logging in, clicking through a flow, every frame), use a binding such as `@surea11y/playwright` in your own test.
+
+### Waiting for content
+
+The scan starts once the page has loaded and its fonts and images have arrived. An app that fetches its data after that (a table of orders, search results, a dashboard) may not have drawn it yet, and a scan then checks an empty page and passes. Name an element that is only there once the content is, and the scan waits for it:
+
+```sh
+surea11y scan https://app.example.com/orders --browser --wait-for "#orders-table"
+surea11y scan https://app.example.com/search?q=shoes --browser --wait-for "[data-results-loaded]" --wait-timeout 60000
+```
+
+The scan starts when an element matching the selector is on the page and shown: not `display: none`, `visibility: hidden` or empty. It waits up to 30 seconds, or `--wait-timeout` milliseconds. If the element never shows, the run stops with exit `2`, naming the selector, rather than scanning a page whose content never arrived; nothing is written. With several pages, every page waits for the same selector, so give one that all of them share (a loaded marker, for instance), or scan pages with different content in separate runs.
+
+### Width and color scheme
+
+A page can look different on a phone or in dark mode, and so can its problems: text that reads well on white can fail contrast on a dark background, and a control that is big enough at 1280 pixels can shrink, or text be cut off, at 320. `--width` sets the viewport's width and `--color-scheme` the `prefers-color-scheme` the page sees, and the rules that measure the layout (contrast, target size, text cut off when spacing grows) judge the page as it is drawn there:
+
+```sh
+surea11y scan https://example.com/ --browser --width 320              # a narrow, phone-sized screen
+surea11y scan https://example.com/ --browser --color-scheme dark      # the dark theme
+surea11y scan https://example.com/ --browser --width 320 --color-scheme dark --html dark-mobile.html
+```
+
+The default is 1280 × 720 in the light scheme. 320 pixels is the width WCAG 1.4.10 (Reflow) asks content to work at, but the engine has no rule for reflow itself yet (content that needs scrolling in two directions): `--width 320` gives the other rules that layout, and the HTML report lets a person check the rest. The summary names what the scan used (`browser: 320×720, dark color scheme`), and the result records it in `engine.environment.viewport` and `.colorScheme`. To check several combinations, run the CLI once for each. A baseline holds the failures found in the combination it was written in, and failures that appear only in another (a cut-off menu at 320 pixels) would be new against it, so keep one baseline file per combination.
 
 ## Baseline / allowlist
 

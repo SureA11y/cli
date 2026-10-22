@@ -133,6 +133,18 @@ surea11y scan https://app.example.com/ https://app.example.com/settings --browse
 
 Each page opens in headless Chromium, its scripts run, and the scan sees what renders, with a real layout for the rules that measure it. The engine is the same `@surea11y/core` the static scan uses. Every option works with it, reports, baselines, packs and custom rules included.
 
+An app that fetches its data after loading can make the scan wait for it, and the browser can be narrowed to a phone's width or switched to dark mode:
+
+```sh
+# Wait until the orders table is shown (up to 30 s, or --wait-timeout ms)
+surea11y scan https://app.example.com/orders --browser --wait-for "#orders-table"
+
+# A phone-sized screen in dark mode: the layout rules judge the page as drawn there
+surea11y scan https://example.com/ --browser --width 320 --color-scheme dark
+```
+
+The summary names the viewport and color scheme each scan used. See [Waiting for content](./docs/CLI.md#waiting-for-content) and [Width and color scheme](./docs/CLI.md#width-and-color-scheme).
+
 ## What it can and can't scan
 
 By default the CLI reads **static HTML** — a local file, or the raw body of an HTTP(S) GET — and never executes page JavaScript. Client-rendered content won't be captured, and geometry-dependent rules report `notApplicable` (there's no real CSS layout under jsdom).
@@ -150,6 +162,10 @@ surea11y scan --urls pages.txt --fail-on-severity serious
 
 # A client-rendered app, as its scripts render it (needs playwright installed)
 surea11y scan https://app.example.com/ --browser
+
+# ...waiting for data it loads after the page, and on a phone in dark mode
+surea11y scan https://app.example.com/orders --browser --wait-for "#orders-table"
+surea11y scan https://example.com/ --browser --width 320 --color-scheme dark
 
 # The same, and the best-practice rules, which test no WCAG criterion
 surea11y scan ./dist/index.html --wcag 2.2 --best-practices
