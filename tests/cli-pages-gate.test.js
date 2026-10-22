@@ -234,3 +234,24 @@ test('--baseline with --fail-on-severity: only new failures at the level fail th
     0
   );
 });
+
+test('the browser-only options need --browser, and valid values', () => {
+  page('opts.html', '<p>x</p>');
+  const without = run(['scan', 'opts.html', '--width', '320', '--color-scheme', 'dark']);
+  assert.equal(without.status, 2);
+  assert.match(without.stderr, /--width, --color-scheme need --browser/);
+  assert.match(run(['scan', 'opts.html', '--wait-for', '#x']).stderr, /--wait-for needs --browser/);
+  const cases = [
+    [['--width', '0'], /--width must be a whole number above 0, not "0"/],
+    [['--width', 'wide'], /--width must be a whole number above 0, not "wide"/],
+    [['--color-scheme', 'sepia'], /--color-scheme must be "light" or "dark", not "sepia"/],
+    [['--wait-timeout', '500'], /--wait-timeout needs --wait-for/],
+    [['--wait-for', '#x', '--wait-timeout', '0'], /--wait-timeout must be a whole number above 0/],
+    [['--wait-for', '  '], /--wait-for needs a selector/]
+  ];
+  for (const [flags, message] of cases) {
+    const r = run(['scan', 'opts.html', '--browser', ...flags]);
+    assert.equal(r.status, 2, flags.join(' '));
+    assert.match(r.stderr, message);
+  }
+});

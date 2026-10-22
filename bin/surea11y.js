@@ -53,6 +53,10 @@ Usage:
 Options:
   --urls <file>           Also scan each path or URL listed in <file>, one per line (# starts a comment)
   --browser               Scan in headless Chromium, running the page's scripts (needs playwright installed)
+  --wait-for <selector>   With --browser: wait until an element matching <selector> is shown, then scan
+  --wait-timeout <ms>     With --wait-for: how long to wait (default: 30000)
+  --width <px>            With --browser: the viewport width (default: 1280; 320 for a phone-sized layout)
+  --color-scheme <s>      With --browser: emulate the user's light or dark color scheme
   --fail-on-severity <s>  Exit 1 only for a failing rule of severity <s> or above: critical, serious,
                           moderate or minor (default: any failure)
   --json                  Print the raw result object as JSON instead of a summary (an array for several pages)
@@ -94,6 +98,8 @@ Examples:
   surea11y scan ./index.html
   surea11y scan ./index.html ./about.html --urls more-pages.txt
   surea11y scan https://app.example.com/ --browser
+  surea11y scan https://app.example.com/orders --browser --wait-for "#orders-table"
+  surea11y scan ./index.html --browser --width 320 --color-scheme dark
   surea11y scan ./index.html --fail-on-severity serious
   surea11y scan https://example.com/ --wcag 2.2 --wcag-level AA
   surea11y scan ./index.html --tags forms --rules contrast-computable --include-mode or
@@ -180,6 +186,18 @@ function parseArgs(argv) {
       case '--browser':
         out.browser = true;
         break;
+      case '--wait-for':
+        out.waitFor = argv[++i];
+        break;
+      case '--wait-timeout':
+        out.waitTimeout = argv[++i];
+        break;
+      case '--width':
+        out.width = argv[++i];
+        break;
+      case '--color-scheme':
+        out.colorScheme = argv[++i];
+        break;
       case '--fail-on-severity':
         out.failOnSeverity = argv[++i];
         break;
@@ -206,6 +224,8 @@ function isUrl(s) {
 // it can't find carries its require stack after it.
 function formatError(err) {
   const base = err && err.message ? err.message : String(err);
+  // An error whose message already says what its cause did.
+  if (err && err.causeIncluded) return base;
   const cause =
     err && err.cause && err.cause.message
       ? err.cause.message.split('\n')[0]
@@ -521,6 +541,13 @@ function printSummary(result, baselineMatch, { compact = false, failOnSeverity =
   if (result.engine && result.engine.wcagLevel) {
     process.stdout.write(`  WCAG level reported: ${result.engine.wcagLevel}\n`);
   }
+  // A browser scan's viewport and color scheme, as the engine recorded them.
+  const environment = result.engine && result.engine.environment;
+  if (environment && environment.layout && environment.viewport) {
+    process.stdout.write(
+      `  browser: ${environment.viewport.width}×${environment.viewport.height}${environment.colorScheme ? `, ${environment.colorScheme} color scheme` : ''}\n`
+    );
+  }
   if (result.engine && result.engine.profile) {
     process.stdout.write(`  profile: ${result.engine.profile}\n`);
   }
@@ -765,13 +792,42 @@ async function createBrowserScanner(engineOptions, runOnly, args, customRules, p
             if (!fs.existsSync(resolved)) throw new Error(`No such file: ${resolved}`);
             return require('url').pathToFileURL(resolved).href;
           })();
-      const page = await browser.newPage();
+      const page = await browser.newPage({
+        viewport: { width: args.width || 1280, height: 720 },
+        ...(args.colorScheme ? { colorScheme: args.colorScheme } : {})
+      });
       try {
         const response = await page.goto(url, { waitUntil: 'load' });
         if (response && !response.ok() && isUrl(target)) {
           throw new Error(
             `Fetching ${target} failed: HTTP ${response.status()} ${response.statusText()}`
           );
+        }
+        // Content an app fetches after the load event: scanning before it
+        // arrives would pass what was never checked, so running out of time
+        // is an error, not a scan.
+        if (args.waitFor) {
+          const timeout = args.waitTimeout || 30000;
+          try {
+            await page.waitForSelector(args.waitFor, { state: 'visible', timeout });
+          } catch (err) {
+            if (err && err.name === 'TimeoutError') {
+              throw Object.assign(
+                new Error(
+                  `--wait-for "${args.waitFor}" found no visible element within ${timeout} ms. Check the selector, or give it more time with --wait-timeout.`,
+                  { cause: err }
+                ),
+                { causeIncluded: true }
+              );
+            }
+            throw Object.assign(
+              new Error(
+                `--wait-for "${args.waitFor}" is not a valid selector: ${formatError(err).split('\n')[0]}`,
+                { cause: err }
+              ),
+              { causeIncluded: true }
+            );
+          }
         }
         // Evaluated rather than added as script tags, so a page's Content
         // Security Policy can't block the engine.
@@ -916,6 +972,58 @@ async function runScan(args) {
       return;
     }
     args.failOnSeverity = level;
+  }
+
+  // Options that only a browser can honour: without --browser, a static scan
+  // would quietly measure nothing of what they ask.
+  const browserOnly = [
+    ['--wait-for', args.waitFor],
+    ['--wait-timeout', args.waitTimeout],
+    ['--width', args.width],
+    ['--color-scheme', args.colorScheme]
+  ].filter(([, given]) => given !== undefined);
+  if (browserOnly.length && !args.browser) {
+    process.stderr.write(
+      `Error: ${browserOnly.map(([flag]) => flag).join(', ')} ${browserOnly.length > 1 ? 'need' : 'needs'} --browser: a static scan has no layout, scripts or color scheme. See --help.\n`
+    );
+    process.exitCode = 2;
+    return;
+  }
+  if (args.waitTimeout !== undefined && args.waitFor === undefined) {
+    process.stderr.write('Error: --wait-timeout needs --wait-for. See --help.\n');
+    process.exitCode = 2;
+    return;
+  }
+  for (const [flag, key, min] of [
+    ['--width', 'width', 1],
+    ['--wait-timeout', 'waitTimeout', 1]
+  ]) {
+    if (args[key] === undefined) continue;
+    const n = Number(args[key]);
+    if (!/^\d+$/.test(String(args[key])) || n < min) {
+      process.stderr.write(
+        `Error: ${flag} must be a whole number above 0, not "${args[key]}". See --help.\n`
+      );
+      process.exitCode = 2;
+      return;
+    }
+    args[key] = n;
+  }
+  if (args.waitFor !== undefined && !String(args.waitFor).trim()) {
+    process.stderr.write('Error: --wait-for needs a selector. See --help.\n');
+    process.exitCode = 2;
+    return;
+  }
+  if (args.colorScheme !== undefined) {
+    const scheme = String(args.colorScheme).toLowerCase();
+    if (!['light', 'dark'].includes(scheme)) {
+      process.stderr.write(
+        `Error: --color-scheme must be "light" or "dark", not "${args.colorScheme}". See --help.\n`
+      );
+      process.exitCode = 2;
+      return;
+    }
+    args.colorScheme = scheme;
   }
 
   if (args.includeMode !== undefined && !['and', 'or'].includes(args.includeMode)) {

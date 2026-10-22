@@ -177,6 +177,76 @@ test('--browser scans several pages in one browser', { skip }, async () => {
   assert.match(r.stdout, /2 pages scanned: 1 with failures\./);
 });
 
+// Content an app adds after the load event, as one that fetches its data.
+const LATE = `<!doctype html><html lang="en"><head><title>Orders</title></head>
+<body><main id="root"><h1>Orders</h1></main>
+<script>setTimeout(() => {
+  document.getElementById('root').insertAdjacentHTML('beforeend', '<div id="orders"><img src="chart.png"></div>');
+}, 700);</script>
+</body></html>`;
+
+test('--wait-for waits for content added after the load event', { skip }, async () => {
+  fs.writeFileSync(path.join(dir, 'late.html'), LATE);
+  const rules = ['--rules', 'img-alt-present', '--json'];
+  const early = JSON.parse((await run(['scan', 'late.html', '--browser', ...rules], dir)).stdout);
+  assert.equal(early.checksResults[0].outcome, 'notApplicable', 'scanned before the content came');
+  const waited = await run(
+    ['scan', 'late.html', '--browser', '--wait-for', '#orders', ...rules],
+    dir
+  );
+  assert.equal(waited.status, 1, waited.stderr);
+  assert.equal(JSON.parse(waited.stdout).checksResults[0].outcome, 'fail');
+});
+
+test(
+  '--wait-for that finds nothing in time stops the run, naming the selector',
+  { skip },
+  async () => {
+    fs.writeFileSync(path.join(dir, 'never.html'), LATE);
+    const r = await run(
+      ['scan', 'never.html', '--browser', '--wait-for', '#invoices', '--wait-timeout', '300'],
+      dir
+    );
+    assert.equal(r.status, 2);
+    assert.equal(
+      r.stderr.trim(),
+      'Error: --wait-for "#invoices" found no visible element within 300 ms. Check the selector, or give it more time with --wait-timeout.'
+    );
+    const bad = await run(['scan', 'never.html', '--browser', '--wait-for', '##x'], dir);
+    assert.equal(bad.status, 2);
+    assert.match(bad.stderr, /--wait-for "##x" is not a valid selector/);
+  }
+);
+
+test('--width and --color-scheme set the page, and the result says so', { skip }, async () => {
+  // Visible only in dark mode, and only on a narrow viewport.
+  fs.writeFileSync(
+    path.join(dir, 'themed.html'),
+    `<!doctype html><html lang="en"><head><title>Themed</title><style>
+      .dark-only, .narrow-only { display: none; }
+      @media (prefers-color-scheme: dark) { .dark-only { display: block; } }
+      @media (max-width: 400px) { .narrow-only { display: block; } }
+    </style></head><body><main><h1>Themed</h1>
+      <img class="dark-only" src="moon.png"><img class="narrow-only" src="menu.png">
+    </main></body></html>`
+  );
+  const scan = async (...flags) =>
+    run(['scan', 'themed.html', '--browser', '--rules', 'img-alt-present', ...flags], dir);
+  const plain = JSON.parse((await scan('--json')).stdout);
+  assert.equal(plain.checksResults[0].outcome, 'notApplicable');
+  assert.deepEqual(plain.engine.environment.viewport, { width: 1280, height: 720 });
+  assert.equal(plain.engine.environment.colorScheme, 'light');
+
+  const dark = JSON.parse((await scan('--color-scheme', 'dark', '--json')).stdout);
+  assert.equal(dark.checksResults[0].occurrences.length, 1);
+  assert.match(dark.checksResults[0].occurrences[0].selector, /dark-only|img/);
+  assert.equal(dark.engine.environment.colorScheme, 'dark');
+
+  const narrow = await scan('--width', '320');
+  assert.equal(narrow.status, 1);
+  assert.match(narrow.stdout, /browser: 320×720, light color scheme/);
+});
+
 // A copy of the CLI whose node_modules has everything but Playwright.
 test('--browser without Playwright says what to install', async () => {
   const project = fs.mkdtempSync(path.join(os.tmpdir(), 'cli-nopw-'));
