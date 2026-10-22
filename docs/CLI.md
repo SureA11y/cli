@@ -5,6 +5,8 @@
 ```sh
 npx @surea11y/cli scan ./index.html
 npx @surea11y/cli scan https://example.com/
+npx @surea11y/cli scan ./index.html ./about.html --urls more-pages.txt
+npx @surea11y/cli scan https://app.example.com/ --browser
 ```
 
 Or install it once:
@@ -16,13 +18,19 @@ npm install --save-dev @surea11y/cli  # or per-project, for CI
 
 ## What it can and can't scan
 
-The CLI reads **static HTML only** — a local file, or the raw response of an HTTP(S) GET request — and never executes page JavaScript. That means client-rendered content (anything your framework injects after page load) won't be captured, and geometry-dependent rules like `target-size-minimum` will report `notApplicable` (no real CSS layout — see [`LIMITATIONS.md`](https://github.com/SureA11y/core/blob/main/docs/LIMITATIONS.md)). If you need either of those, drive a real browser yourself and use `runa11yCoreInPage` from `@surea11y/core` directly — see [`INTEGRATION.md`](https://github.com/SureA11y/core/blob/main/docs/INTEGRATION.md) Pattern 2. The CLI is the fast path for static/server-rendered pages and CI; the library is what you reach for beyond that.
+By default the CLI reads **static HTML** — a local file, or the raw response of an HTTP(S) GET request — and never executes page JavaScript. That means client-rendered content (anything your framework injects after page load) won't be captured, and geometry-dependent rules like `target-size-minimum` will report `notApplicable` (no real CSS layout — see [`LIMITATIONS.md`](https://github.com/SureA11y/core/blob/main/docs/LIMITATIONS.md)). It is the fast path for static and server-rendered pages.
+
+With `--browser`, it opens each page in headless Chromium instead, runs its scripts, and scans what renders, with a real layout. See [In a real browser](#in-a-real-browser) below.
 
 ## Options
 
 | Flag | Meaning |
 |---|---|
-| `--json` | Print the raw result object (see [`OUTPUT_SCHEMA.md`](https://github.com/SureA11y/core/blob/main/docs/OUTPUT_SCHEMA.md)) instead of a human-readable summary. |
+| `<file-or-url>...` | The pages to scan: one or more local files or HTTP(S) URLs. See [Several pages](#several-pages) below. |
+| `--urls <file>` | Also scan each path or URL listed in `<file>`, one per line; blank lines and `#` comments are skipped. |
+| `--browser` | Scan each page in headless Chromium, running its scripts, through Playwright, which you install. See [In a real browser](#in-a-real-browser) below. |
+| `--fail-on-severity <severity>` | Exit `1` only for a failing rule of this severity or above: `critical`, `serious`, `moderate` or `minor`. Every failure is still reported. See [Failing only on serious problems](#failing-only-on-serious-problems) below. |
+| `--json` | Print the raw result object (see [`OUTPUT_SCHEMA.md`](https://github.com/SureA11y/core/blob/main/docs/OUTPUT_SCHEMA.md)) instead of a human-readable summary; for several pages, an array of them. |
 | `--locale <locale>` | Output text locale (default `en`) — see [`I18N.md`](https://github.com/SureA11y/core/blob/main/docs/I18N.md). |
 | `--rules <ids>` | Comma-separated rule IDs — only run these. |
 | `--exclude-rules <ids>` | Comma-separated rule IDs — never run these. |
@@ -37,7 +45,7 @@ The CLI reads **static HTML only** — a local file, or the raw response of an H
 | `--profile <name>` | Run a conformance profile, such as `en301549-v4.1.1` or a pack's own. A profile that isn't applied exits `2`. See [`ENGINE_OPTIONS.md`](https://github.com/SureA11y/core/blob/main/docs/ENGINE_OPTIONS.md#conformance-profiles). |
 | `--write-baseline <path>` | Write every current `fail` occurrence to `<path>`; never fails the build. See [`BASELINE.md`](https://github.com/SureA11y/core/blob/main/docs/BASELINE.md). |
 | `--baseline <path>` | Gate only on occurrences not already recorded in `<path>`. See [`BASELINE.md`](https://github.com/SureA11y/core/blob/main/docs/BASELINE.md). |
-| `--html <path>` | Write a self-contained, browsable HTML report to `<path>`. See [`REPORT.md`](https://github.com/SureA11y/core/blob/main/docs/REPORT.md). |
+| `--html <path>` | Write a self-contained, browsable HTML report to `<path>`; for several pages, one each: `<path>`, then `<name>-2.<ext>`, `<name>-3.<ext>`... See [`REPORT.md`](https://github.com/SureA11y/core/blob/main/docs/REPORT.md). |
 | `--sarif <path>` | Write a SARIF 2.1.0 report to `<path>` (e.g. for GitHub Code Scanning). See [`SARIF.md`](https://github.com/SureA11y/core/blob/main/docs/SARIF.md). |
 | `--junit <path>` | Write a JUnit XML report to `<path>` (for the test views of GitLab, Azure DevOps, Jenkins, CircleCI). See [JUnit report](#junit-report) below. |
 | `--compact` | Keep each `pass` and `notApplicable` result to its rule, outcome and type: a smaller `--json`, and the same reports. See [Compact results](#compact-results) below. |
@@ -101,13 +109,64 @@ The heading names the target from the scan (`--wcag`, `--wcag-level`, or what a 
 
 | Code | Meaning |
 |---|---|
-| `0` | Scan completed, no `fail` outcomes. |
-| `1` | Scan completed, at least one `fail` outcome — the CI-gating case. |
-| `2` | Usage error, or the scan itself couldn't run (bad path/URL, network failure, missing `jsdom`), or it would have checked nothing or less than asked: a `--rules`/`--tags` list naming no known rule or tag, a selection whose parts cancel out so that no rule runs (`--rules img-alt-present --exclude-rules img-alt-present`), a `--context` selector that is invalid or matches no element, a custom rule the engine could not run, a pack that can't be found or loaded or that the engine skipped, or a `--profile` that wasn't applied. No report or baseline is written. |
+| `0` | Scan completed, no `fail` outcomes on any page (none at or above `--fail-on-severity`'s level, when given). |
+| `1` | Scan completed, at least one `fail` outcome on some page (at or above `--fail-on-severity`'s level, when given) — the CI-gating case. |
+| `2` | Usage error, or the scan itself couldn't run (bad path/URL, network failure, missing `jsdom`, `--browser` without Playwright or Chromium, a `--urls` file that can't be read or lists nothing), or it would have checked nothing or less than asked: a `--rules`/`--tags` list naming no known rule or tag, a selection whose parts cancel out so that no rule runs (`--rules img-alt-present --exclude-rules img-alt-present`), a `--context` selector that is invalid or matches no element, a custom rule the engine could not run, a pack that can't be found or loaded or that the engine skipped, or a `--profile` that wasn't applied. No report or baseline is written. |
 
 `cantTell` outcomes never affect the exit code — they're printed as a "needs human review" summary, consistent with the manual/`cantTell` mental model in [`TROUBLESHOOTING.md`](https://github.com/SureA11y/core/blob/main/docs/TROUBLESHOOTING.md#should-i-treat-canttell-as-a-failure). If you need `cantTell`-aware gating, use `--json` and inspect `checksResults` yourself, or call the library directly (see [`INTEGRATION.md`](https://github.com/SureA11y/core/blob/main/docs/INTEGRATION.md#ci-gating-a-build-on-the-result)).
 
 With `--baseline`, exit code `1` means at least one *new* (not-yet-baselined) `fail` occurrence, not any `fail` occurrence — see [`BASELINE.md`](https://github.com/SureA11y/core/blob/main/docs/BASELINE.md).
+
+With several pages, one that can't be scanned stops the run with `2`, naming the page, and nothing is written.
+
+## Failing only on serious problems
+
+Every rule result has a severity: `critical`, `serious`, `moderate` or `minor` (a profile can set its own). `--fail-on-severity` makes only failures at that level or above fail the run, so a team can start by blocking on serious problems while the rest are still reported and fixed over time:
+
+```sh
+surea11y scan ./dist/index.html --fail-on-severity serious
+```
+
+A failing rule below the level is still listed, with "below --fail-on-severity serious, does not fail the run" next to it, and is in every report and in `--json` as usual. With `--baseline`, only *new* failures at the level count. `fail` keeps its meaning, a definite violation; the option only chooses which ones stop the build. The summary lists failing rules most severe first.
+
+## Several pages
+
+Give several paths or URLs, or list them in a file with `--urls`, and each page is scanned in turn:
+
+```sh
+surea11y scan ./dist/index.html ./dist/about.html
+surea11y scan --urls pages.txt --sarif a11y.sarif --junit a11y.junit.xml
+```
+
+```text
+# pages.txt
+./dist/index.html
+./dist/pricing.html
+https://staging.example.com/account   # behind the build, scanned live
+```
+
+- The summary has a section per page, then a line such as `3 pages scanned: 1 with failures.` The run fails when any page does.
+- `--json` prints an array, one result per page, in the order given.
+- `--sarif` writes one file with one run holding every page's findings; each finding names its page as its location, as with one page. (GitHub code scanning refuses a file with several runs of one tool.)
+- `--junit` writes one file. Each page's suites are named after the page (`dist/about.html — WCAG 1.1.1`), and its test cases' class names too (`dist/about.html/wcag-1.1.1`), so a CI's test history keeps pages apart.
+- `--html` writes one report per page: `report.html`, `report-2.html`, ...
+- `--write-baseline` records each entry with its page: a URL as given, a file by its path relative to the working directory, so the baseline matches in another checkout. `--baseline` then matches each page against its own entries, so a known failure on one page doesn't hide the same one on another. An entry with no page, from a baseline written for one page, applies to whatever page is scanned.
+
+## In a real browser
+
+```sh
+npm install --save-dev playwright      # once, in your project
+npx playwright install chromium        # and its browser
+surea11y scan https://app.example.com/ --browser
+```
+
+`--browser` opens each page in headless Chromium through [Playwright](https://playwright.dev/), lets its scripts run, waits for its fonts and images, and scans what renders. Client-rendered content is scanned, and the rules that measure the layout (`target-size-minimum`, `text-spacing-content-loss`, ...) can decide. Local files open as `file://` pages.
+
+- Playwright is not a dependency of the CLI: install it in your project, where the CLI finds it. Without it, or without its Chromium, `--browser` exits `2` saying what to install. `CHROMIUM_EXECUTABLE_PATH` points it at another Chromium build.
+- The engine in the page is the browser bundle of the same `@surea11y/core` the CLI uses for static scans, so both modes judge with one engine version; only how the page is rendered differs.
+- Every option works as in a static scan, packs and custom rules included: packs are loaded into the page as core's `packScript`, and custom rules as their source.
+- The engine is loaded by evaluating it, not with a script tag, so a page whose Content Security Policy forbids inline scripts is still scanned. A custom rule given as a function is passed as source and needs `eval`, which such a policy may forbid; the engine then skips it and says so, and the run exits `2`.
+- Only the top document is scanned; frames inside it are not, for now. For more control over the browser (logging in, clicking through a flow, every frame), use a binding such as `@surea11y/playwright` in your own test.
 
 ## Baseline / allowlist
 
@@ -352,4 +411,4 @@ Or, since the exit code already reflects pass/fail, just let the command's own e
 
 ## A note on dependencies
 
-This CLI depends on `jsdom` (to parse fetched/read HTML into a DOM) and on `@surea11y/core` (the engine). That split is the whole point of shipping the CLI separately: `@surea11y/core` itself has **zero runtime dependencies**, so using the library directly against a DOM you already have — jsdom, a real browser, Playwright, whatever — never pulls in `jsdom` a second time. Install `@surea11y/cli` when you want the command; install `@surea11y/core` when you want the API.
+This CLI depends on `jsdom` (to parse fetched/read HTML into a DOM) and on `@surea11y/core` (the engine). `--browser` also needs `playwright`, which you install yourself; the CLI never installs a browser. That split is the whole point of shipping the CLI separately: `@surea11y/core` itself has **zero runtime dependencies**, so using the library directly against a DOM you already have — jsdom, a real browser, Playwright, whatever — never pulls in `jsdom` a second time. Install `@surea11y/cli` when you want the command; install `@surea11y/core` when you want the API.

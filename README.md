@@ -1,6 +1,6 @@
 # @surea11y/cli
 
-Command-line WCAG 2.2 accessibility scanner for static HTML — baseline gating, HTML, SARIF and JUnit reports, custom rules. Powered by [`@surea11y/core`](https://github.com/SureA11y/core), the deterministic engine that tells you what it *can't* tell you.
+Command-line WCAG 2.2 accessibility scanner for static HTML, or rendered pages with `--browser` — several pages per run, baseline and severity gating, HTML, SARIF and JUnit reports, custom rules. Powered by [`@surea11y/core`](https://github.com/SureA11y/core), the deterministic engine that tells you what it *can't* tell you.
 
 ```sh
 npx @surea11y/cli scan ./index.html
@@ -76,13 +76,13 @@ The `criteria` block reads the same scan by WCAG criterion, the way people usual
 
 That last line is the point of the engine: rules that *cannot* be settled from static markup are reported as `cantTell` and routed to a human, instead of being silently dropped or guessed at. `cantTell` never affects the exit code.
 
-Exit code `0` = clean, `1` = at least one `fail` (the CI-gating case), `2` = usage error or the scan couldn't run, including a scan that would have checked nothing or less than asked (a `--rules`/`--tags` typo, a `--context` selector that matches nothing, a custom rule or a pack that didn't run, a `--profile` that wasn't applied).
+Exit code `0` = clean, `1` = at least one `fail` on some page (the CI-gating case; `--fail-on-severity serious` counts only serious and critical ones), `2` = usage error or the scan couldn't run, including a scan that would have checked nothing or less than asked (a `--rules`/`--tags` typo, a `--context` selector that matches nothing, a custom rule or a pack that didn't run, a `--profile` that wasn't applied).
 
 ## What it can and can't scan
 
-The CLI reads **static HTML only** — a local file, or the raw body of an HTTP(S) GET — and never executes page JavaScript. Client-rendered content won't be captured, and geometry-dependent rules report `notApplicable` (there's no real CSS layout under jsdom).
+By default the CLI reads **static HTML** — a local file, or the raw body of an HTTP(S) GET — and never executes page JavaScript. Client-rendered content won't be captured, and geometry-dependent rules report `notApplicable` (there's no real CSS layout under jsdom).
 
-For client-rendered pages, drive a real browser and call the engine directly against the live DOM — see [`INTEGRATION.md`](https://github.com/SureA11y/core/blob/main/docs/INTEGRATION.md) Pattern 2, or use one of the ready-made bindings (Playwright, Puppeteer, Cypress, Selenium, WebdriverIO).
+With `--browser` (and Playwright installed in your project), it opens each page in headless Chromium, lets its scripts run, and scans what renders, with the same `@surea11y/core`. For content that only appears after a click or a login, drive the browser yourself with one of the bindings (Playwright, Puppeteer, Cypress, Selenium, WebdriverIO). See [`docs/CLI.md`](./docs/CLI.md#in-a-real-browser).
 
 ## Common uses
 
@@ -154,14 +154,15 @@ test('dashboard is accessible after loading', async ({ page }) => {
 });
 ```
 
-No `@surea11y/cli` here. This is also CI — but the CLI would be *useless* for it, because it never executes page JavaScript. Point `surea11y scan` at that URL and it sees the page before the click ever happens: no chart, nothing to check.
+No `@surea11y/cli` here. This is also CI — but the CLI can't click. Even with `--browser`, `surea11y scan` sees the page as it loads, before the click ever happens: no chart, nothing to check.
 
 ### The dividing line
 
 It isn't local vs. CI — both examples are CI. It's:
 
 - **Is what you want to scan present in the HTML the server sends?** The CLI works, and it's the cheap path: no browser to launch.
-- **Does it only appear after JavaScript runs?** You need a real browser, so you need the library or a binding, and the CLI can't help.
+- **Does it appear once the page's JavaScript has run, with no one touching it?** The CLI with `--browser` works: a client-rendered app's pages, scanned as they load.
+- **Does it only appear after someone clicks, types or logs in?** You need to drive the browser, so you need the library or a binding.
 
 That second case is why "use the CLI for pipelines" is a misleading shorthand — plenty of pipelines are the second example.
 

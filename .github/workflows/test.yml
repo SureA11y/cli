@@ -20,6 +20,13 @@ jobs:
           node-version: ${{ matrix.node-version }}
           cache: npm
       - run: npm ci
+      # Chromium for the --browser tests (tests/cli-browser.test.js), which
+      # skip without it. Its system libraries come from apt, which can be
+      # slow, so they get a step and a time limit of their own.
+      - run: npx playwright install chromium
+        timeout-minutes: 5
+      - run: npx playwright install-deps chromium
+        timeout-minutes: 20
       - run: npm run lint
       - run: npm run format:check
       - run: npm test

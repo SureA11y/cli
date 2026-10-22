@@ -5,13 +5,12 @@
 /**
  * surea11y CLI — a thin wrapper around @surea11y/core for ad hoc/CI use.
  *
- * Static-HTML only: it does not execute page JavaScript, so client-rendered
- * content won't be scanned. For that, use a real browser via Puppeteer/
- * Playwright — see
- * https://github.com/SureA11y/core/blob/main/docs/INTEGRATION.md Pattern 2.
+ * By default it scans static HTML in jsdom, without running the page's
+ * JavaScript. --browser scans in headless Chromium through Playwright (which
+ * the user installs), so client-rendered content is scanned as rendered.
  *
  * Usage:
- *   surea11y scan <file-or-url> [options]
+ *   surea11y scan <file-or-url>... [options]
  *
  * See docs/CLI.md for the full option reference.
  */
@@ -49,10 +48,14 @@ function printHelp() {
     .write(`surea11y v${pkg.version}${coreVersion ? ` (@surea11y/core v${coreVersion})` : ''}
 
 Usage:
-  surea11y scan <file-or-url> [options]
+  surea11y scan <file-or-url>... [options]
 
 Options:
-  --json                  Print the raw result object as JSON instead of a summary
+  --urls <file>           Also scan each path or URL listed in <file>, one per line (# starts a comment)
+  --browser               Scan in headless Chromium, running the page's scripts (needs playwright installed)
+  --fail-on-severity <s>  Exit 1 only for a failing rule of severity <s> or above: critical, serious,
+                          moderate or minor (default: any failure)
+  --json                  Print the raw result object as JSON instead of a summary (an array for several pages)
   --locale <locale>       Locale for output text (default: en)
   --rules <ids>           Comma-separated rule IDs to run (only these)
   --exclude-rules <ids>   Comma-separated rule IDs to exclude
@@ -68,7 +71,8 @@ Options:
   --profile <name>        Run a conformance profile (e.g. en301549-v4.1.1, or a pack's own)
   --write-baseline <path> Write every current "fail" occurrence to <path>; never fails the build
   --baseline <path>       Gate only on occurrences not already recorded in <path>
-  --html <path>           Write a self-contained, browsable HTML report to <path>
+  --html <path>           Write a self-contained, browsable HTML report to <path> (several pages:
+                          <path>, then <name>-2.<ext>, <name>-3.<ext>...)
   --sarif <path>          Write a SARIF 2.1.0 report to <path> (for GitHub Code Scanning etc.)
   --junit <path>          Write a JUnit XML report to <path> (for GitLab, Azure DevOps, Jenkins, CircleCI)
   --compact               Keep pass/notApplicable results to their rule, outcome and type (a smaller --json)
@@ -76,16 +80,21 @@ Options:
   -v, --version           Show the installed version
 
 Exit codes:
-  0  scan completed, no "fail" outcomes (or no *new* ones, with --baseline)
-  1  scan completed, at least one "fail" outcome (or *new* one, with --baseline)
+  0  scan completed, no "fail" outcomes (or no *new* ones, with --baseline; or none at
+     --fail-on-severity's level), on every page
+  1  scan completed, at least one "fail" outcome (or *new* one, with --baseline; at or
+     above --fail-on-severity's level), on any page
   2  usage error or the scan itself could not run (bad path/URL, network failure,
      a --rules/--tags list naming no rule or tag, or a selection that runs no
      rule, a --context selector that is invalid or matches nothing, a custom
      rule or a pack the engine could not run, a --profile that was not
-     applied, etc.)
+     applied, --browser without playwright, etc.)
 
 Examples:
   surea11y scan ./index.html
+  surea11y scan ./index.html ./about.html --urls more-pages.txt
+  surea11y scan https://app.example.com/ --browser
+  surea11y scan ./index.html --fail-on-severity serious
   surea11y scan https://example.com/ --wcag 2.2 --wcag-level AA
   surea11y scan ./index.html --tags forms --rules contrast-computable --include-mode or
   surea11y scan ./index.html --rules contrast-computable --wcag-level AA
@@ -164,6 +173,15 @@ function parseArgs(argv) {
         break;
       case '--junit':
         out.junit = argv[++i];
+        break;
+      case '--urls':
+        out.urls = argv[++i];
+        break;
+      case '--browser':
+        out.browser = true;
+        break;
+      case '--fail-on-severity':
+        out.failOnSeverity = argv[++i];
         break;
       case '-h':
       case '--help':
@@ -465,7 +483,7 @@ function printCriteria(result, { compact = false } = {}) {
   );
 }
 
-function printSummary(result, baselineMatch, { compact = false } = {}) {
+function printSummary(result, baselineMatch, { compact = false, failOnSeverity = null } = {}) {
   function getOccurrenceOutcome(ruleResult, occurrence) {
     const occurrenceOutcome =
       occurrence &&
@@ -516,7 +534,13 @@ function printSummary(result, baselineMatch, { compact = false } = {}) {
     `  occurrences by tier: fail: ${occurrenceTierCounts.fail}   cantTell: ${occurrenceTierCounts.cantTell}\n\n`
   );
 
-  const fails = result.checksResults.filter((r) => r.outcome === 'fail');
+  // Most severe first, then by rule.
+  const fails = result.checksResults
+    .filter((r) => r.outcome === 'fail')
+    .sort(
+      (a, b) =>
+        severityRank(b.severity) - severityRank(a.severity) || a.ruleId.localeCompare(b.ruleId)
+    );
   if (fails.length) {
     process.stdout.write(`FAIL (${fails.length} rule(s)):\n`);
     for (const r of fails) {
@@ -526,8 +550,11 @@ function printSummary(result, baselineMatch, { compact = false } = {}) {
       const cantTellOccurrences = (r.occurrences || []).filter(
         (occ) => getOccurrenceOutcome(r, occ) === 'cantTell'
       );
+      const belowGate = !countsForGate(r.severity, failOnSeverity)
+        ? `; below --fail-on-severity ${failOnSeverity}, does not fail the run`
+        : '';
       process.stdout.write(
-        `\n  ${r.ruleId}  (${r.severity}, ${failOccurrences.length} fail occurrence(s)${cantTellOccurrences.length ? `, ${cantTellOccurrences.length} needs-review occurrence(s)` : ''})\n`
+        `\n  ${r.ruleId}  (${r.severity}, ${failOccurrences.length} fail occurrence(s)${cantTellOccurrences.length ? `, ${cantTellOccurrences.length} needs-review occurrence(s)` : ''}${belowGate})\n`
       );
       for (const occ of failOccurrences.slice(0, 5)) {
         process.stdout.write(`    - ${occ.selector || '(no selector)'}\n      ${occ.summary}\n`);
@@ -604,13 +631,266 @@ function loadBaselineFile(baselinePath) {
   return parsed;
 }
 
+// Severities from least to most severe; --fail-on-severity gates on its level
+// and those above it.
+const SEVERITIES = ['minor', 'moderate', 'serious', 'critical'];
+
+function severityRank(severity) {
+  return SEVERITIES.indexOf(String(severity || '').toLowerCase());
+}
+
+// Whether a failing rule of this severity fails the run.
+function countsForGate(severity, threshold) {
+  if (!threshold) return true;
+  return severityRank(severity) >= severityRank(threshold);
+}
+
+// The pages to scan: the paths and URLs given, then those listed in --urls,
+// one per line, skipping blank lines and # comments.
+function collectTargets(args) {
+  const targets = args._.slice();
+  if (args.urls) {
+    let text;
+    try {
+      text = fs.readFileSync(path.resolve(process.cwd(), args.urls), 'utf8');
+    } catch (err) {
+      throw new Error(`Could not read --urls file "${args.urls}": ${formatError(err)}`, {
+        cause: err
+      });
+    }
+    for (const line of text.split(/\r?\n/)) {
+      const entry = line.replace(/#.*$/, '').trim();
+      if (entry) targets.push(entry);
+    }
+  }
+  return targets;
+}
+
+// How a page is named in a baseline written for several pages: a URL as
+// given, a file by its path relative to the working directory, so the
+// baseline matches on another machine or checkout.
+function pageKey(target) {
+  if (isUrl(target)) return target;
+  return path
+    .relative(process.cwd(), path.resolve(process.cwd(), target))
+    .split(path.sep)
+    .join('/');
+}
+
+// The HTML report's file for the nth page (from 1): the path given for the
+// first, then <name>-2.<ext>, <name>-3.<ext>...
+function numberedPath(file, n) {
+  if (n === 1) return file;
+  const ext = path.extname(file);
+  return `${file.slice(0, file.length - ext.length)}-${n}${ext}`;
+}
+
+// The static scanner: the page's HTML in jsdom, no scripts run.
+function createStaticScanner(engineOptions, runOnly, args) {
+  let JSDOM;
+  try {
+    ({ JSDOM } = require('jsdom'));
+  } catch {
+    throw new Error(
+      'the surea11y CLI requires jsdom. It is a dependency of this package, so a missing jsdom means a broken install — try reinstalling with `npm install -g @surea11y/cli` (or `npm install` in your project).'
+    );
+  }
+  // Deferred so `--help`/`--version` don't load the full rule catalog.
+  const { runDomRulesInPage } = require('@surea11y/core');
+  return {
+    async scan(target) {
+      const { html, url } = await loadHtml(target);
+      const dom = new JSDOM(html, { url, pretendToBeVisual: true });
+      global.window = dom.window;
+      global.document = dom.window.document;
+      try {
+        return runDomRulesInPage(url, args.context || null, engineOptions, runOnly);
+      } finally {
+        dom.window.close();
+      }
+    },
+    async close() {}
+  };
+}
+
+// The browser scanner: each page opened in headless Chromium through
+// Playwright, which the user installs. The engine is core's own browser
+// bundle, from the same @surea11y/core as the static scan, so both modes
+// judge with one engine. Packs go in as core's packScript, custom rules as
+// their source (functions can't cross into the page). Every frame but the top
+// one is left out for now.
+async function createBrowserScanner(engineOptions, runOnly, args, customRules, packs) {
+  let chromium;
+  try {
+    const resolved = require.resolve('playwright', { paths: [process.cwd(), __dirname] });
+    ({ chromium } = require(resolved));
+  } catch {
+    throw new Error(
+      '--browser needs Playwright, which is not installed. Install it in this project with `npm install playwright` and its browser with `npx playwright install chromium`.'
+    );
+  }
+  const bundle = fs.readFileSync(require.resolve('@surea11y/core/browser'), 'utf8');
+  const packSource = packs.length ? require('@surea11y/core/pack').packScript(packs) : null;
+  const pageOptions = { ...engineOptions };
+  if (customRules.length) {
+    pageOptions.customRules = customRules.map((rule) => ({
+      ...rule,
+      runInPage: typeof rule.runInPage === 'function' ? rule.runInPage.toString() : rule.runInPage,
+      ...(typeof rule.applicability === 'function'
+        ? { applicability: rule.applicability.toString() }
+        : {})
+    }));
+  }
+  if (packs.length) pageOptions.packs = packs.map((p) => `${p.name}@${p.version}`);
+
+  let browser;
+  try {
+    browser = await chromium.launch(
+      process.env.CHROMIUM_EXECUTABLE_PATH
+        ? { executablePath: process.env.CHROMIUM_EXECUTABLE_PATH }
+        : {}
+    );
+  } catch (err) {
+    throw new Error(
+      `--browser could not start Chromium (${formatError(err).split('\n')[0]}). Install it with \`npx playwright install chromium\`.`,
+      { cause: err }
+    );
+  }
+  return {
+    async scan(target) {
+      const url = isUrl(target)
+        ? target
+        : (() => {
+            const resolved = path.resolve(process.cwd(), target);
+            if (!fs.existsSync(resolved)) throw new Error(`No such file: ${resolved}`);
+            return require('url').pathToFileURL(resolved).href;
+          })();
+      const page = await browser.newPage();
+      try {
+        const response = await page.goto(url, { waitUntil: 'load' });
+        if (response && !response.ok() && isUrl(target)) {
+          throw new Error(
+            `Fetching ${target} failed: HTTP ${response.status()} ${response.statusText()}`
+          );
+        }
+        // Evaluated rather than added as script tags, so a page's Content
+        // Security Policy can't block the engine.
+        await page.evaluate(bundle);
+        if (packSource) await page.evaluate(packSource);
+        await page.evaluate(() => window.a11ycore.waitForPageReady());
+        const outcome = await page.evaluate(
+          ({ context, options, only }) => {
+            // The style sheets the page can't read are fetched first where the
+            // bundle can (core 1.14 and later); an older one scans as it is.
+            const engine = window.a11ycore;
+            const scan = engine.runa11yCoreInPageAsync
+              ? () => engine.runa11yCoreInPageAsync(location.href, context, options, only)
+              : () => engine.runa11yCoreInPage(location.href, context, options, only);
+            return Promise.resolve()
+              .then(scan)
+              .then(
+                (result) => ({ result }),
+                (err) => ({ error: { message: String(err && err.message), code: err && err.code } })
+              );
+          },
+          { context: args.context || null, options: pageOptions, only: runOnly }
+        );
+        if (outcome.error) {
+          const err = new Error(outcome.error.message);
+          err.code = outcome.error.code;
+          err.fromEngine = true;
+          throw err;
+        }
+        return outcome.result;
+      } finally {
+        await page.close();
+      }
+    },
+    async close() {
+      await browser.close();
+    }
+  };
+}
+
+// SARIF for several pages: one run, the results of every page (each already
+// names its page as its artifact), with the rules they use. GitHub code
+// scanning refuses a file with several runs of one tool.
+function mergeSarif(texts) {
+  const logs = texts.map((t) => JSON.parse(t));
+  const merged = logs[0];
+  const run = merged.runs[0];
+  const ruleIds = new Set((run.tool.driver.rules || []).map((r) => r.id));
+  for (const log of logs.slice(1)) {
+    const other = log.runs[0];
+    for (const rule of other.tool.driver.rules || []) {
+      if (!ruleIds.has(rule.id)) {
+        ruleIds.add(rule.id);
+        (run.tool.driver.rules = run.tool.driver.rules || []).push(rule);
+      }
+    }
+    run.results = run.results.concat(other.results || []);
+  }
+  return JSON.stringify(merged, null, 2) + '\n';
+}
+
+function xmlAttr(value) {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+// JUnit for several pages: one <testsuites>, each page's suites named after
+// the page ("about.html — WCAG 1.1.1") and its testcases' classnames too
+// ("about.html/wcag-1.1.1"), so a CI's test history keeps the pages apart.
+function mergeJunit(texts, pages) {
+  const totals = { tests: 0, failures: 0, errors: 0, skipped: 0 };
+  const suites = [];
+  texts.forEach((xml, i) => {
+    const root = /<testsuites\b([^>]*)>/.exec(xml);
+    for (const key of Object.keys(totals)) {
+      const m = new RegExp(`\\b${key}="(\\d+)"`).exec(root ? root[1] : '');
+      totals[key] += m ? Number(m[1]) : 0;
+    }
+    const prefix = xmlAttr(pages[i]);
+    const body = xml.slice(
+      xml.indexOf('>', xml.indexOf('<testsuites')) + 1,
+      xml.lastIndexOf('</testsuites>')
+    );
+    suites.push(
+      body
+        .replace(/<testsuite name="/g, `<testsuite name="${prefix} — `)
+        .replace(/<testcase classname="/g, `<testcase classname="${prefix}/`)
+        .replace(/^\n+|\n+$/g, '')
+    );
+  });
+  return [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    `<testsuites name="surea11y" tests="${totals.tests}" failures="${totals.failures}" errors="${totals.errors}" skipped="${totals.skipped}" time="0">`,
+    ...suites,
+    '</testsuites>',
+    ''
+  ].join('\n');
+}
+
 async function runScan(args) {
-  const target = args._[0];
-  if (!target) {
-    process.stderr.write('Error: scan requires a file path or URL. See --help.\n');
+  let targets;
+  try {
+    targets = collectTargets(args);
+  } catch (err) {
+    process.stderr.write(`Error: ${formatError(err)}\n`);
     process.exitCode = 2;
     return;
   }
+  if (!targets.length) {
+    process.stderr.write(
+      `Error: scan requires a file path or URL${args.urls ? ` (--urls "${args.urls}" lists none)` : ''}. See --help.\n`
+    );
+    process.exitCode = 2;
+    return;
+  }
+  const several = targets.length > 1;
 
   // Checked here, since without --wcag the engine would only warn and ignore
   // a level it can't use. Any case is accepted, as the engine accepts it.
@@ -624,6 +904,18 @@ async function runScan(args) {
       return;
     }
     args.wcagLevel = level;
+  }
+
+  if (args.failOnSeverity !== undefined) {
+    const level = String(args.failOnSeverity).toLowerCase();
+    if (!SEVERITIES.includes(level)) {
+      process.stderr.write(
+        `Error: --fail-on-severity must be "critical", "serious", "moderate" or "minor", not "${args.failOnSeverity}". See --help.\n`
+      );
+      process.exitCode = 2;
+      return;
+    }
+    args.failOnSeverity = level;
   }
 
   if (args.includeMode !== undefined && !['and', 'or'].includes(args.includeMode)) {
@@ -677,104 +969,114 @@ async function runScan(args) {
     }
   }
 
-  let html, url;
+  const engineOptions = buildEngineOptions(args, customRules, packs);
+  const runOnly = buildRunOnly(args);
+
+  let scanner;
   try {
-    ({ html, url } = await loadHtml(target));
+    scanner = args.browser
+      ? await createBrowserScanner(engineOptions, runOnly, args, customRules, packs)
+      : createStaticScanner(engineOptions, runOnly, args);
   } catch (err) {
     process.stderr.write(`Error: ${formatError(err)}\n`);
     process.exitCode = 2;
     return;
   }
 
-  let JSDOM;
+  // Every page is scanned before anything is written, so a page that can't be
+  // scanned leaves no partial reports or baseline behind.
+  const pages = [];
   try {
-    ({ JSDOM } = require('jsdom'));
-  } catch {
-    process.stderr.write(
-      'Error: the surea11y CLI requires jsdom. It is a dependency of this package, so a missing jsdom means a broken install — try reinstalling with `npm install -g @surea11y/cli` (or `npm install` in your project).\n'
-    );
-    process.exitCode = 2;
-    return;
-  }
-
-  // Deferred so `--help`/`--version` don't load the full rule catalog.
-  const { runDomRulesInPage } = require('@surea11y/core');
-
-  const dom = new JSDOM(html, { url, pretendToBeVisual: true });
-  global.window = dom.window;
-  global.document = dom.window.document;
-
-  let result;
-  try {
-    result = runDomRulesInPage(
-      url,
-      args.context || null,
-      buildEngineOptions(args, customRules, packs),
-      buildRunOnly(args)
-    );
-  } catch (err) {
-    process.stderr.write(`Error: ${describeEngineError(err)}\n`);
-    process.exitCode = 2;
-    return;
+    for (const target of targets) {
+      const where = several ? `${target}: ` : '';
+      let result;
+      try {
+        result = await scanner.scan(target);
+      } catch (err) {
+        const known = err && (err.code || err.fromEngine);
+        process.stderr.write(
+          `Error: ${where}${known ? describeEngineError(err) : formatError(err)}\n`
+        );
+        process.exitCode = 2;
+        return;
+      }
+      const scanProblem = findScanProblem(result, args);
+      if (scanProblem) {
+        process.stderr.write(`Error: ${where}${scanProblem}\n`);
+        process.exitCode = 2;
+        return;
+      }
+      pages.push({ target, page: pageKey(target), result });
+    }
   } finally {
-    dom.window.close();
+    await scanner.close();
   }
 
-  const scanProblem = findScanProblem(result, args);
-  if (scanProblem) {
-    process.stderr.write(`Error: ${scanProblem}\n`);
-    process.exitCode = 2;
-    return;
-  }
+  // A baseline entry written for several pages names its page; one without a
+  // page (a baseline written for a single page) applies to whatever is scanned.
+  const entriesFor = (page) =>
+    baselineFile ? baselineFile.entries.filter((e) => !e.page || e.page === page) : undefined;
 
   if (args.html) {
-    fs.writeFileSync(
-      args.html,
-      renderHtmlReport(result, { title: `surea11y scan report — ${target}` })
-    );
-    process.stderr.write(`Wrote HTML report to: ${args.html}\n`);
+    pages.forEach(({ target, result }, i) => {
+      const file = numberedPath(args.html, i + 1);
+      fs.writeFileSync(
+        file,
+        renderHtmlReport(result, { title: `surea11y scan report — ${target}` })
+      );
+      process.stderr.write(`Wrote HTML report to: ${file}\n`);
+    });
   }
 
   if (args.sarif) {
-    fs.writeFileSync(
-      args.sarif,
+    const texts = pages.map(({ result, page }) =>
       renderSarifReport(result, {
         toolVersion: pkg.version,
         informationUri: (pkg.homepage || '').replace(/#.*$/, ''),
-        baselineEntries: baselineFile ? baselineFile.entries : undefined
+        baselineEntries: entriesFor(page)
       })
     );
+    fs.writeFileSync(args.sarif, several ? mergeSarif(texts) : texts[0]);
     process.stderr.write(`Wrote SARIF report to: ${args.sarif}\n`);
   }
 
   if (args.junit) {
+    const texts = pages.map(({ result, page }) =>
+      renderJunitReport(result, { baselineEntries: entriesFor(page) })
+    );
     fs.writeFileSync(
       args.junit,
-      renderJunitReport(result, {
-        baselineEntries: baselineFile ? baselineFile.entries : undefined
-      })
+      several
+        ? mergeJunit(
+            texts,
+            pages.map((p) => p.page)
+          )
+        : texts[0]
     );
     process.stderr.write(`Wrote JUnit report to: ${args.junit}\n`);
   }
 
+  const printJson = (values) =>
+    process.stdout.write(JSON.stringify(several ? values : values[0], null, 2) + '\n');
+
   if (args.writeBaseline) {
-    const entries = buildBaselineEntries(result);
+    const perPage = pages.map(({ result, page }) => {
+      const entries = buildBaselineEntries(result);
+      return several ? entries.map((e) => ({ ...e, page })) : entries;
+    });
+    const entries = [].concat(...perPage);
     const payload = { version: 1, generatedAt: new Date().toISOString(), entries };
     fs.writeFileSync(args.writeBaseline, JSON.stringify(payload, null, 2) + '\n');
 
     if (args.json) {
-      process.stdout.write(
-        JSON.stringify(
-          {
-            ...result,
-            baseline: { mode: 'write', path: args.writeBaseline, entries: entries.length }
-          },
-          null,
-          2
-        ) + '\n'
+      printJson(
+        pages.map(({ result }, i) => ({
+          ...result,
+          baseline: { mode: 'write', path: args.writeBaseline, entries: perPage[i].length }
+        }))
       );
     } else {
-      printSummary(result, undefined, { compact: args.compact });
+      for (const { result } of pages) printSummary(result, undefined, args);
     }
     process.stderr.write(
       `Wrote ${entries.length} occurrence(s) to baseline: ${args.writeBaseline}\n`
@@ -783,28 +1085,37 @@ async function runScan(args) {
     return;
   }
 
-  if (baselineFile) {
-    const match = matchBaseline(result, baselineFile.entries);
-
-    if (args.json) {
-      process.stdout.write(
-        JSON.stringify({ ...result, baseline: { mode: 'check', ...match } }, null, 2) + '\n'
-      );
-    } else {
-      printSummary(result, match, { compact: args.compact });
+  const severityOf = (result) =>
+    Object.fromEntries(result.checksResults.map((r) => [r.ruleId, r.severity]));
+  let gated = 0;
+  const outputs = pages.map(({ result, page }) => {
+    if (baselineFile) {
+      const match = matchBaseline(result, entriesFor(page));
+      const severities = severityOf(result);
+      const gating = match.newOccurrences.filter((o) =>
+        countsForGate(severities[o.ruleId], args.failOnSeverity)
+      ).length;
+      if (gating) gated += 1;
+      return { result, match, json: { ...result, baseline: { mode: 'check', ...match } } };
     }
-    process.exitCode = match.newCount > 0 ? 1 : 0;
-    return;
-  }
+    const failing = result.checksResults.some(
+      (r) => r.outcome === 'fail' && countsForGate(r.severity, args.failOnSeverity)
+    );
+    if (failing) gated += 1;
+    return { result, match: undefined, json: result };
+  });
 
   if (args.json) {
-    process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+    printJson(outputs.map((o) => o.json));
   } else {
-    printSummary(result, undefined, { compact: args.compact });
+    for (const o of outputs) printSummary(o.result, o.match, args);
+    if (several) {
+      process.stdout.write(
+        `${pages.length} pages scanned: ${gated} ${args.baseline ? 'with new failures' : 'with failures'}${args.failOnSeverity ? ` at ${args.failOnSeverity} or above` : ''}.\n`
+      );
+    }
   }
-
-  const hasFail = result.checksResults.some((r) => r.outcome === 'fail');
-  process.exitCode = hasFail ? 1 : 0;
+  process.exitCode = gated > 0 ? 1 : 0;
 }
 
 async function main() {
