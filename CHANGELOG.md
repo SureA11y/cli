@@ -2,6 +2,18 @@
 
 All notable changes to this package are documented here. This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Added
+
+- Several pages per run: `surea11y scan a.html b.html https://example.com/`, and `--urls <file>` for a list, one path or URL per line, with `#` comments. The summary has a section per page and a closing count, and the run fails when any page does. `--json` prints an array, `--sarif` one run with every page's findings, `--junit` one file whose suites and class names carry the page, and `--html` a report per page (`report.html`, `report-2.html`...). `--write-baseline` records the page of each entry, so `--baseline` matches each page against its own; a baseline written for one page keeps working. A page that can't be scanned stops the run with exit `2`, naming it, before anything is written. Before, every path after the first was silently ignored. See [`docs/CLI.md`](./docs/CLI.md#several-pages).
+- `--fail-on-severity <critical|serious|moderate|minor>`: only a failing rule at that severity or above fails the run, with `--baseline` only a new one. Every failure is still reported, and the summary marks those below the level. See [`docs/CLI.md`](./docs/CLI.md#failing-only-on-serious-problems).
+- `--browser` scans each page in headless Chromium through Playwright, which you install in your project: the page's scripts run, so client-rendered content is scanned, with a real layout. The engine in the page is the browser bundle of the same `@surea11y/core` as static scans. Every option works, packs and custom rules included, and a page whose Content Security Policy forbids inline scripts is still scanned. Without Playwright or its Chromium, `--browser` exits `2` saying what to install. Frames inside the page are not scanned yet. See [`docs/CLI.md`](./docs/CLI.md#in-a-real-browser).
+
+### Changed
+
+- The summary lists failing rules most severe first, then by rule, rather than in the catalog's order. `--json` and the reports keep the engine's order.
+
 ## 1.3.0
 
 Requires `@surea11y/core` 1.12.0.
