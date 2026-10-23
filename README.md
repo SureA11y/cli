@@ -143,7 +143,7 @@ surea11y scan https://app.example.com/orders --browser --wait-for "#orders-table
 surea11y scan https://example.com/ --browser --width 320 --color-scheme dark
 ```
 
-The summary names the viewport and color scheme each scan used. See [Waiting for content](./docs/CLI.md#waiting-for-content) and [Width and color scheme](./docs/CLI.md#width-and-color-scheme).
+The summary names the viewport and color scheme each scan used, and the hooks it installed before the page's scripts so web components' names and listeners added from script are judged too (`--live-regions` adds the live-region hook) (`--no-hooks` leaves them out). See [Waiting for content](./docs/CLI.md#waiting-for-content) and [Width and color scheme](./docs/CLI.md#width-and-color-scheme).
 
 ## What it can and can't scan
 

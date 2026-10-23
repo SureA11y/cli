@@ -247,6 +247,52 @@ test('--width and --color-scheme set the page, and the result says so', { skip }
   assert.match(narrow.stdout, /browser: 320×720, light color scheme/);
 });
 
+// A toast the page adds a moment after it loads, with its text already in
+// it: screen readers commonly don't announce a live region's first content.
+const LATE_TOAST = `<!doctype html><html lang="en"><head><title>App</title></head>
+<body><main><h1>App</h1><div id="slot"></div></main>
+<script>setTimeout(() => {
+  document.getElementById('slot').innerHTML = '<div id="toast" role="status">Saved</div>';
+}, 50);</script>
+</body></html>`;
+
+const HAS_LIVE_REGION_HOOK = typeof require('@surea11y/core').liveRegionHookScript === 'function';
+
+test(
+  '--live-regions: with the live-region hook, a status region added with its text is asked about',
+  { skip: skip || (!HAS_LIVE_REGION_HOOK && 'needs @surea11y/core 1.14.0') },
+  async () => {
+    fs.writeFileSync(path.join(dir, 'toast.html'), LATE_TOAST);
+    const flags = ['--browser', '--wait-for', '#toast', '--rules', 'live-region-announcements'];
+    const r = await run(['scan', 'toast.html', ...flags, '--live-regions', '--json'], dir);
+    assert.equal(r.stderr, '');
+    const result = JSON.parse(r.stdout);
+    assert.equal(result.engine.environment.liveRegionHook, 'early');
+    assert.equal(result.checksResults[0].outcome, 'cantTell');
+    assert.deepEqual(
+      result.checksResults[0].occurrences.map((o) => [
+        o.data.details.reasonCode,
+        o.data.details.text
+      ]),
+      [['LIVE_REGION_INSERTED_WITH_CONTENT', 'Saved']]
+    );
+    const summary = await run(['scan', 'toast.html', ...flags, '--live-regions'], dir);
+    assert.match(summary.stdout, /hooks: internals, listeners, live regions/);
+    // Without it, the default, only the page as it is now is judged: the
+    // region passes.
+    const plain = JSON.parse((await run(['scan', 'toast.html', ...flags, '--json'], dir)).stdout);
+    assert.equal(plain.engine.environment.liveRegionHook, undefined);
+    assert.equal(plain.checksResults[0].outcome, 'pass');
+    // --no-hooks leaves out the other two; --live-regions still adds its own.
+    const alone = JSON.parse(
+      (await run(['scan', 'toast.html', ...flags, '--no-hooks', '--live-regions', '--json'], dir))
+        .stdout
+    );
+    assert.equal(alone.engine.environment.liveRegionHook, 'early');
+    assert.equal(alone.engine.environment.internalsHook, undefined);
+  }
+);
+
 // A copy of the CLI whose node_modules has everything but Playwright.
 test('--browser without Playwright says what to install', async () => {
   const project = fs.mkdtempSync(path.join(os.tmpdir(), 'cli-nopw-'));
@@ -277,3 +323,83 @@ test('--browser without Playwright says what to install', async () => {
     fs.rmSync(project, { recursive: true, force: true });
   }
 });
+
+// A custom button given its click listener by the page's script, with no key
+// listener anywhere: Enter and Space do nothing.
+const SCRIPTED_BUTTON = `<!doctype html><html lang="en"><head><title>App</title></head>
+<body><main><h1>App</h1><div id="save" role="button" tabindex="0">Save</div></main>
+<script>document.getElementById('save').addEventListener('click', () => {});</script>
+</body></html>`;
+
+const HAS_LISTENER_HOOK = typeof require('@surea11y/core').listenerHookScript === 'function';
+
+test(
+  "--browser installs core's hooks before the page's scripts, and says so; --no-hooks leaves them out",
+  { skip },
+  async () => {
+    fs.writeFileSync(path.join(dir, 'button.html'), SCRIPTED_BUTTON);
+    // Any rule: the result records the hooks whichever ran.
+    const rules = ['--rules', 'page-title-present'];
+    const hooked = JSON.parse(
+      (await run(['scan', 'button.html', '--browser', ...rules, '--json'], dir)).stdout
+    );
+    assert.equal(hooked.engine.environment.internalsHook, 'early');
+    const summary = await run(['scan', 'button.html', '--browser', ...rules], dir);
+    assert.match(summary.stdout, /hooks: internals/);
+
+    const plain = JSON.parse(
+      (await run(['scan', 'button.html', '--browser', '--no-hooks', ...rules, '--json'], dir))
+        .stdout
+    );
+    assert.equal(plain.engine.environment.internalsHook, undefined);
+    assert.equal(plain.engine.environment.listenerHook, undefined);
+    assert.equal(plain.engine.environment.liveRegionHook, undefined);
+    assert.doesNotMatch(
+      (await run(['scan', 'button.html', '--browser', '--no-hooks', ...rules], dir)).stdout,
+      /hooks:/
+    );
+  }
+);
+
+test(
+  '--browser: with the listener hook, a custom button with a click listener and no key listener fails',
+  { skip: skip || (!HAS_LISTENER_HOOK && 'needs @surea11y/core 1.14.0') },
+  async () => {
+    fs.writeFileSync(path.join(dir, 'button.html'), SCRIPTED_BUTTON);
+    const r = await run(
+      ['scan', 'button.html', '--browser', '--rules', 'click-handler-keyboard-operable', '--json'],
+      dir
+    );
+    assert.equal(r.status, 1, r.stderr);
+    const result = JSON.parse(r.stdout);
+    assert.equal(result.engine.environment.listenerHook, 'early');
+    assert.equal(result.checksResults[0].outcome, 'fail');
+    assert.equal(
+      result.checksResults[0].occurrences[0].data.details.reasonCode,
+      'CLICK_HANDLER_NO_KEY_LISTENER'
+    );
+    const summary = await run(
+      ['scan', 'button.html', '--browser', '--rules', 'click-handler-keyboard-operable'],
+      dir
+    );
+    assert.match(summary.stdout, /hooks: internals, listeners/);
+    // Without the hooks the listener can't be seen, as before.
+    const plain = JSON.parse(
+      (
+        await run(
+          [
+            'scan',
+            'button.html',
+            '--browser',
+            '--no-hooks',
+            '--rules',
+            'click-handler-keyboard-operable',
+            '--json'
+          ],
+          dir
+        )
+      ).stdout
+    );
+    assert.equal(plain.checksResults[0].outcome, 'notApplicable');
+  }
+);
