@@ -52,6 +52,8 @@ Usage:
 
 Options:
   --urls <file>           Also scan each path or URL listed in <file>, one per line (# starts a comment)
+  --sitemap <url-or-file> Also scan the pages a sitemap.xml lists (a sitemap index is followed)
+  --max-pages <n>         With --sitemap: scan at most <n> of its pages (default: 50)
   --browser               Scan in headless Chromium, running the page's scripts (needs playwright installed)
   --wait-for <selector>   With --browser: wait until an element matching <selector> is shown, then scan
   --wait-timeout <ms>     With --wait-for: how long to wait (default: 30000)
@@ -97,6 +99,7 @@ Exit codes:
 Examples:
   surea11y scan ./index.html
   surea11y scan ./index.html ./about.html --urls more-pages.txt
+  surea11y scan --sitemap https://example.com/sitemap.xml --max-pages 20
   surea11y scan https://app.example.com/ --browser
   surea11y scan https://app.example.com/orders --browser --wait-for "#orders-table"
   surea11y scan ./index.html --browser --width 320 --color-scheme dark
@@ -182,6 +185,12 @@ function parseArgs(argv) {
         break;
       case '--urls':
         out.urls = argv[++i];
+        break;
+      case '--sitemap':
+        out.sitemap = argv[++i];
+        break;
+      case '--max-pages':
+        out.maxPages = argv[++i];
         break;
       case '--browser':
         out.browser = true;
@@ -672,9 +681,105 @@ function countsForGate(severity, threshold) {
   return severityRank(severity) >= severityRank(threshold);
 }
 
+// The pages a sitemap lists, in its order: the <loc> of each <url>, and of
+// each <url> in the sitemaps a sitemap index names, followed one level down
+// (the depth the protocol allows), gzipped or not. Reading stops once `max`
+// pages are found; `listed` counts every page seen, to say what was cut.
+// Relative locations resolve against the sitemap's own address.
+const SITEMAP_DEFAULT_MAX_PAGES = 50;
+
+async function readSitemapText(source) {
+  let bytes;
+  if (isUrl(source)) {
+    const res = await fetch(source);
+    if (!res.ok) throw new Error(`Fetching ${source} failed: HTTP ${res.status} ${res.statusText}`);
+    bytes = Buffer.from(await res.arrayBuffer());
+  } else {
+    const resolved = path.resolve(process.cwd(), source);
+    if (!fs.existsSync(resolved)) throw new Error(`No such file: ${resolved}`);
+    bytes = fs.readFileSync(resolved);
+  }
+  // A gzipped sitemap (sitemap.xml.gz) starts with gzip's magic bytes.
+  if (bytes[0] === 0x1f && bytes[1] === 0x8b) bytes = require('zlib').gunzipSync(bytes);
+  return bytes.toString('utf8');
+}
+
+async function readSitemap(source, max) {
+  const { JSDOM } = require('jsdom');
+  const base = isUrl(source)
+    ? source
+    : require('url').pathToFileURL(path.resolve(process.cwd(), source)).href;
+  const parse = (text, where) => {
+    let doc;
+    try {
+      doc = new JSDOM(text, { contentType: 'text/xml' }).window.document;
+    } catch {
+      throw new Error(`${where} is not a sitemap: it is not well-formed XML`);
+    }
+    const root = doc.documentElement;
+    if (
+      !root ||
+      root.localName === 'parsererror' ||
+      doc.getElementsByTagName('parsererror').length
+    ) {
+      throw new Error(`${where} is not a sitemap: it is not well-formed XML`);
+    }
+    const locs = (parentName) =>
+      Array.from(doc.getElementsByTagNameNS('*', 'loc'))
+        .filter((loc) => loc.parentElement && loc.parentElement.localName === parentName)
+        .map((loc) => loc.textContent.trim())
+        .filter(Boolean);
+    if (root.localName === 'sitemapindex') return { sitemaps: locs('sitemap'), pages: [] };
+    if (root.localName === 'urlset') return { sitemaps: [], pages: locs('url') };
+    throw new Error(
+      `${where} is not a sitemap: its root is <${root.localName}>, not <urlset> or <sitemapindex>`
+    );
+  };
+  // A local sitemap's pages are files: given as paths, as on the command line.
+  const resolve = (loc, from) => {
+    try {
+      const url = new URL(loc, from);
+      return url.protocol === 'file:' ? require('url').fileURLToPath(url) : url.href;
+    } catch {
+      return loc;
+    }
+  };
+  const top = parse(await readSitemapText(source), `--sitemap "${source}"`);
+  const pages = [];
+  let listed = 0;
+  const take = (list, from) => {
+    for (const loc of list) {
+      listed += 1;
+      if (pages.length < max) pages.push(resolve(loc, from));
+    }
+  };
+  take(top.pages, base);
+  for (const child of top.sitemaps) {
+    const url = resolve(child, base);
+    const sub = parse(await readSitemapText(url), `The sitemap ${url}`);
+    take(sub.pages, url);
+  }
+  return { pages, listed };
+}
+
+// With no failing rule anywhere and something checked, the summary ends by
+// saying that is not a conformance claim, as core's HTML report does: what
+// the rules can't judge is left to a person.
+function printNotConformance(results) {
+  const checks = [].concat(...results.map((r) => r.checksResults || []));
+  if (checks.some((r) => r.outcome === 'fail')) return;
+  if (!checks.some((r) => r.outcome === 'pass' || r.outcome === 'cantTell')) return;
+  const pages = results.length > 1 ? 'these pages conform' : 'the page conforms';
+  process.stdout.write(
+    `No rule failed, which is not a claim that ${pages}: the automated rules found nothing definite. ` +
+      'A person still checks the cantTell findings, keyboard use, how a screen reader reads the page, and the content itself.\n'
+  );
+}
+
 // The pages to scan: the paths and URLs given, then those listed in --urls,
-// one per line, skipping blank lines and # comments.
-function collectTargets(args) {
+// one per line, skipping blank lines and # comments, then those --sitemap
+// lists, up to --max-pages. A page named twice is scanned once.
+async function collectTargets(args) {
   const targets = args._.slice();
   if (args.urls) {
     let text;
@@ -690,7 +795,24 @@ function collectTargets(args) {
       if (entry) targets.push(entry);
     }
   }
-  return targets;
+  if (args.sitemap) {
+    let sitemap;
+    try {
+      sitemap = await readSitemap(args.sitemap, args.maxPages);
+    } catch (err) {
+      throw new Error(`Could not read --sitemap "${args.sitemap}": ${formatError(err)}`, {
+        cause: err
+      });
+    }
+    if (!sitemap.listed) throw new Error(`--sitemap "${args.sitemap}" lists no pages`);
+    if (sitemap.listed > sitemap.pages.length) {
+      process.stderr.write(
+        `sitemap: ${sitemap.listed} pages listed, scanning the first ${sitemap.pages.length} (--max-pages ${args.maxPages}).\n`
+      );
+    }
+    targets.push(...sitemap.pages);
+  }
+  return [...new Set(targets)];
 }
 
 // How a page is named in a baseline written for several pages: a URL as
@@ -931,9 +1053,27 @@ function mergeJunit(texts, pages) {
 }
 
 async function runScan(args) {
+  // --max-pages limits what --sitemap adds: a whole number above 0.
+  if (args.maxPages !== undefined) {
+    if (!args.sitemap) {
+      process.stderr.write('Error: --max-pages needs --sitemap. See --help.\n');
+      process.exitCode = 2;
+      return;
+    }
+    if (!/^\d+$/.test(String(args.maxPages)) || Number(args.maxPages) < 1) {
+      process.stderr.write(
+        `Error: --max-pages must be a whole number above 0, not "${args.maxPages}". See --help.\n`
+      );
+      process.exitCode = 2;
+      return;
+    }
+    args.maxPages = Number(args.maxPages);
+  } else if (args.sitemap) {
+    args.maxPages = SITEMAP_DEFAULT_MAX_PAGES;
+  }
   let targets;
   try {
-    targets = collectTargets(args);
+    targets = await collectTargets(args);
   } catch (err) {
     process.stderr.write(`Error: ${formatError(err)}\n`);
     process.exitCode = 2;
@@ -1222,6 +1362,7 @@ async function runScan(args) {
         `${pages.length} pages scanned: ${gated} ${args.baseline ? 'with new failures' : 'with failures'}${args.failOnSeverity ? ` at ${args.failOnSeverity} or above` : ''}.\n`
       );
     }
+    printNotConformance(pages.map((p) => p.result));
   }
   process.exitCode = gated > 0 ? 1 : 0;
 }

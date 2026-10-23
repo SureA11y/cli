@@ -87,6 +87,7 @@ Exit code `0` = clean, `1` = at least one `fail` on some page (the CI-gating cas
 ```sh
 surea11y scan ./dist/index.html ./dist/pricing.html
 surea11y scan --urls pages.txt
+surea11y scan --sitemap https://example.com/sitemap.xml   # up to 50 pages; --max-pages to change it
 ```
 
 ```text
