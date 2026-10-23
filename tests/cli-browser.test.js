@@ -259,12 +259,12 @@ const LATE_TOAST = `<!doctype html><html lang="en"><head><title>App</title></hea
 const HAS_LIVE_REGION_HOOK = typeof require('@surea11y/core').liveRegionHookScript === 'function';
 
 test(
-  '--browser: with the live-region hook, a status region added with its text is asked about',
+  '--live-regions: with the live-region hook, a status region added with its text is asked about',
   { skip: skip || (!HAS_LIVE_REGION_HOOK && 'needs @surea11y/core 1.14.0') },
   async () => {
     fs.writeFileSync(path.join(dir, 'toast.html'), LATE_TOAST);
     const flags = ['--browser', '--wait-for', '#toast', '--rules', 'live-region-announcements'];
-    const r = await run(['scan', 'toast.html', ...flags, '--json'], dir);
+    const r = await run(['scan', 'toast.html', ...flags, '--live-regions', '--json'], dir);
     assert.equal(r.stderr, '');
     const result = JSON.parse(r.stdout);
     assert.equal(result.engine.environment.liveRegionHook, 'early');
@@ -276,14 +276,20 @@ test(
       ]),
       [['LIVE_REGION_INSERTED_WITH_CONTENT', 'Saved']]
     );
-    const summary = await run(['scan', 'toast.html', ...flags], dir);
+    const summary = await run(['scan', 'toast.html', ...flags, '--live-regions'], dir);
     assert.match(summary.stdout, /hooks: internals, listeners, live regions/);
-    // Without the hooks only the page as it is now is judged: the region passes.
-    const plain = JSON.parse(
-      (await run(['scan', 'toast.html', ...flags, '--no-hooks', '--json'], dir)).stdout
-    );
+    // Without it, the default, only the page as it is now is judged: the
+    // region passes.
+    const plain = JSON.parse((await run(['scan', 'toast.html', ...flags, '--json'], dir)).stdout);
     assert.equal(plain.engine.environment.liveRegionHook, undefined);
     assert.equal(plain.checksResults[0].outcome, 'pass');
+    // --no-hooks leaves out the other two; --live-regions still adds its own.
+    const alone = JSON.parse(
+      (await run(['scan', 'toast.html', ...flags, '--no-hooks', '--live-regions', '--json'], dir))
+        .stdout
+    );
+    assert.equal(alone.engine.environment.liveRegionHook, 'early');
+    assert.equal(alone.engine.environment.internalsHook, undefined);
   }
 );
 
