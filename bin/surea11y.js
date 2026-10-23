@@ -55,8 +55,10 @@ Options:
   --browser               Scan in headless Chromium, running the page's scripts (needs playwright installed)
   --wait-for <selector>   With --browser: wait until an element matching <selector> is shown, then scan
   --wait-timeout <ms>     With --wait-for: how long to wait (default: 30000)
-  --width <px>            With --browser: the viewport width (default: 1280; 320 for a phone-sized layout)
-  --color-scheme <s>      With --browser: emulate the user's light or dark color scheme
+  --width <px>            With --browser: the viewport width (default: 1280; 320 for a phone-sized layout);
+                          several, comma-separated (1280,320), scan the page at each
+  --color-scheme <s>      With --browser: emulate the user's light or dark color scheme; light,dark scans
+                          in both. Several widths or schemes scan every combination, one merged result
   --fail-on-severity <s>  Exit 1 only for a failing rule of severity <s> or above: critical, serious,
                           moderate or minor (default: any failure)
   --json                  Print the raw result object as JSON instead of a summary (an array for several pages)
@@ -542,8 +544,19 @@ function printSummary(result, baselineMatch, { compact = false, failOnSeverity =
     process.stdout.write(`  WCAG level reported: ${result.engine.wcagLevel}\n`);
   }
   // A browser scan's viewport and color scheme, as the engine recorded them.
+  // With several widths or color schemes, each scan's, by the name its
+  // findings list under "seen in".
   const environment = result.engine && result.engine.environment;
-  if (environment && environment.layout && environment.viewport) {
+  if (Array.isArray(result.conditionRuns) && result.conditionRuns.length > 1) {
+    process.stdout.write(`  browser: ${result.conditionRuns.length} scans, merged\n`);
+    for (const run of result.conditionRuns) {
+      const env = run.environment || {};
+      const view = env.viewport ? `${env.viewport.width}×${env.viewport.height}` : '?';
+      process.stdout.write(
+        `    ${run.condition}: ${view}${env.colorScheme ? `, ${env.colorScheme} color scheme` : ''}\n`
+      );
+    }
+  } else if (environment && environment.layout && environment.viewport) {
     process.stdout.write(
       `  browser: ${environment.viewport.width}×${environment.viewport.height}${environment.colorScheme ? `, ${environment.colorScheme} color scheme` : ''}\n`
     );
@@ -586,6 +599,9 @@ function printSummary(result, baselineMatch, { compact = false, failOnSeverity =
       for (const occ of failOccurrences.slice(0, 5)) {
         process.stdout.write(`    - ${occ.selector || '(no selector)'}\n      ${occ.summary}\n`);
         if (occ.hint) process.stdout.write(`      hint: ${occ.hint}\n`);
+        if (Array.isArray(occ.conditions)) {
+          process.stdout.write(`      seen in: ${occ.conditions.join(', ')}\n`);
+        }
       }
       if (failOccurrences.length > 5) {
         process.stdout.write(`    ... and ${failOccurrences.length - 5} more\n`);
@@ -740,6 +756,10 @@ function createStaticScanner(engineOptions, runOnly, args) {
   };
 }
 
+// A browser scan's viewport: --width's, or this, by 720 pixels.
+const DEFAULT_WIDTH = 1280;
+const VIEWPORT_HEIGHT = 720;
+
 // The browser scanner: each page opened in headless Chromium through
 // Playwright, which the user installs. The engine is core's own browser
 // bundle, from the same @surea11y/core as the static scan, so both modes
@@ -770,6 +790,34 @@ async function createBrowserScanner(engineOptions, runOnly, args, customRules, p
   }
   if (packs.length) pageOptions.packs = packs.map((p) => `${p.name}@${p.version}`);
 
+  // Every combination of the widths and color schemes asked for, widths
+  // first; one, the default 1280 pixels and the browser's scheme, without
+  // either.
+  const conditions = [];
+  for (const width of args.width || [DEFAULT_WIDTH]) {
+    for (const colorScheme of args.colorScheme || [null]) conditions.push({ width, colorScheme });
+  }
+  // Each combination is named by what varies: 'dark', 'width 320',
+  // 'dark, width 320'.
+  const conditionName = (c) =>
+    [
+      args.colorScheme && args.colorScheme.length > 1 ? c.colorScheme : null,
+      args.width && args.width.length > 1 ? `width ${c.width}` : null
+    ]
+      .filter(Boolean)
+      .join(', ');
+  // The merge comes from @surea11y/binding-base, the bindings' own, so the
+  // CLI and .conditions() in a test report a page the same way.
+  let mergeConditionResults = null;
+  if (conditions.length > 1) {
+    ({ mergeConditionResults } = require('@surea11y/binding-base'));
+    if (typeof mergeConditionResults !== 'function') {
+      throw new Error(
+        'Several widths or color schemes need @surea11y/binding-base 1.6.0 or later.'
+      );
+    }
+  }
+
   let browser;
   try {
     browser = await chromium.launch(
@@ -792,9 +840,10 @@ async function createBrowserScanner(engineOptions, runOnly, args, customRules, p
             if (!fs.existsSync(resolved)) throw new Error(`No such file: ${resolved}`);
             return require('url').pathToFileURL(resolved).href;
           })();
+      const [first, ...rest] = conditions;
       const page = await browser.newPage({
-        viewport: { width: args.width || 1280, height: 720 },
-        ...(args.colorScheme ? { colorScheme: args.colorScheme } : {})
+        viewport: { width: first.width, height: VIEWPORT_HEIGHT },
+        ...(first.colorScheme ? { colorScheme: first.colorScheme } : {})
       });
       try {
         const response = await page.goto(url, { waitUntil: 'load' });
@@ -833,31 +882,17 @@ async function createBrowserScanner(engineOptions, runOnly, args, customRules, p
         // Security Policy can't block the engine.
         await page.evaluate(bundle);
         if (packSource) await page.evaluate(packSource);
-        await page.evaluate(() => window.a11ycore.waitForPageReady());
-        const outcome = await page.evaluate(
-          ({ context, options, only }) => {
-            // The style sheets the page can't read are fetched first where the
-            // bundle can (core 1.14 and later); an older one scans as it is.
-            const engine = window.a11ycore;
-            const scan = engine.runa11yCoreInPageAsync
-              ? () => engine.runa11yCoreInPageAsync(location.href, context, options, only)
-              : () => engine.runa11yCoreInPage(location.href, context, options, only);
-            return Promise.resolve()
-              .then(scan)
-              .then(
-                (result) => ({ result }),
-                (err) => ({ error: { message: String(err && err.message), code: err && err.code } })
-              );
-          },
-          { context: args.context || null, options: pageOptions, only: runOnly }
-        );
-        if (outcome.error) {
-          const err = new Error(outcome.error.message);
-          err.code = outcome.error.code;
-          err.fromEngine = true;
-          throw err;
+        if (!rest.length) return await scanPage(page);
+        // Several widths or color schemes: the page loaded once, then each
+        // combination set on it and scanned, merged into one result.
+        const runs = [{ condition: conditionName(first), result: await scanPage(page) }];
+        for (const condition of rest) {
+          await page.setViewportSize({ width: condition.width, height: VIEWPORT_HEIGHT });
+          if (condition.colorScheme)
+            await page.emulateMedia({ colorScheme: condition.colorScheme });
+          runs.push({ condition: conditionName(condition), result: await scanPage(page) });
         }
-        return outcome.result;
+        return mergeConditionResults(runs);
       } finally {
         await page.close();
       }
@@ -866,6 +901,34 @@ async function createBrowserScanner(engineOptions, runOnly, args, customRules, p
       await browser.close();
     }
   };
+
+  async function scanPage(page) {
+    await page.evaluate(() => window.a11ycore.waitForPageReady());
+    const outcome = await page.evaluate(
+      ({ context, options, only }) => {
+        // The style sheets the page can't read are fetched first where the
+        // bundle can (core 1.14 and later); an older one scans as it is.
+        const engine = window.a11ycore;
+        const scan = engine.runa11yCoreInPageAsync
+          ? () => engine.runa11yCoreInPageAsync(location.href, context, options, only)
+          : () => engine.runa11yCoreInPage(location.href, context, options, only);
+        return Promise.resolve()
+          .then(scan)
+          .then(
+            (result) => ({ result }),
+            (err) => ({ error: { message: String(err && err.message), code: err && err.code } })
+          );
+      },
+      { context: args.context || null, options: pageOptions, only: runOnly }
+    );
+    if (outcome.error) {
+      const err = new Error(outcome.error.message);
+      err.code = outcome.error.code;
+      err.fromEngine = true;
+      throw err;
+    }
+    return outcome.result;
+  }
 }
 
 // SARIF for several pages: one run, the results of every page (each already
@@ -994,10 +1057,23 @@ async function runScan(args) {
     process.exitCode = 2;
     return;
   }
-  for (const [flag, key, min] of [
-    ['--width', 'width', 1],
-    ['--wait-timeout', 'waitTimeout', 1]
-  ]) {
+  // Several widths or color schemes, comma-separated, each checked; the scan
+  // runs every combination of them.
+  if (args.width !== undefined) {
+    const widths = String(args.width)
+      .split(',')
+      .map((w) => w.trim());
+    const bad = widths.find((w) => !/^\d+$/.test(w) || Number(w) < 1);
+    if (bad !== undefined) {
+      process.stderr.write(
+        `Error: --width must be a whole number above 0, or several separated by commas, not "${args.width}". See --help.\n`
+      );
+      process.exitCode = 2;
+      return;
+    }
+    args.width = [...new Set(widths.map(Number))];
+  }
+  for (const [flag, key, min] of [['--wait-timeout', 'waitTimeout', 1]]) {
     if (args[key] === undefined) continue;
     const n = Number(args[key]);
     if (!/^\d+$/.test(String(args[key])) || n < min) {
@@ -1015,15 +1091,17 @@ async function runScan(args) {
     return;
   }
   if (args.colorScheme !== undefined) {
-    const scheme = String(args.colorScheme).toLowerCase();
-    if (!['light', 'dark'].includes(scheme)) {
+    const schemes = String(args.colorScheme)
+      .split(',')
+      .map((c) => c.trim().toLowerCase());
+    if (schemes.some((c) => !['light', 'dark'].includes(c))) {
       process.stderr.write(
-        `Error: --color-scheme must be "light" or "dark", not "${args.colorScheme}". See --help.\n`
+        `Error: --color-scheme must be "light", "dark" or "light,dark", not "${args.colorScheme}". See --help.\n`
       );
       process.exitCode = 2;
       return;
     }
-    args.colorScheme = scheme;
+    args.colorScheme = [...new Set(schemes)];
   }
 
   if (args.includeMode !== undefined && !['and', 'or'].includes(args.includeMode)) {
