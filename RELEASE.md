@@ -30,9 +30,9 @@ Any future package split out of the engine needs this same step before its first
 
 ## Ordering constraint (read this first)
 
-This package declares a dependency on `@surea11y/core`. **The engine version it declares must already be on the npm registry**, or the release is unusable — `npm ci` fails in CI, and anyone who installs the CLI gets a broken tree.
+This package declares dependencies on `@surea11y/core` and `@surea11y/binding-base` (which merges scans under several widths and color schemes). **The versions it declares must already be on the npm registry**, or the release is unusable — `npm ci` fails in CI, and anyone who installs the CLI gets a broken tree.
 
-The release workflow enforces this — it resolves the declared range against the registry and fails with a clear error — but it's cheaper to get the order right than to burn a tag. (For 1.0.0 this meant `@surea11y/core@1.4.0` had to publish first.)
+The release workflow enforces this — it resolves both declared ranges against the registry and fails with a clear error — but it's cheaper to get the order right than to burn a tag. (For 1.0.0 this meant `@surea11y/core@1.4.0` had to publish first.)
 
 ## Checklist
 

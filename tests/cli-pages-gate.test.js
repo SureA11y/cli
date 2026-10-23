@@ -247,9 +247,18 @@ test('the browser-only options need --browser, and valid values', () => {
     /--live-regions needs --browser/
   );
   const cases = [
-    [['--width', '0'], /--width must be a whole number above 0, not "0"/],
-    [['--width', 'wide'], /--width must be a whole number above 0, not "wide"/],
-    [['--color-scheme', 'sepia'], /--color-scheme must be "light" or "dark", not "sepia"/],
+    [
+      ['--width', '0'],
+      /--width must be a whole number above 0, or several separated by commas, not "0"/
+    ],
+    [['--width', 'wide'], /--width must be a whole number above 0, .* not "wide"/],
+    [['--width', '1280,'], /--width must be a whole number above 0, .* not "1280,"/],
+    [['--width', '1280,0'], /--width must be a whole number above 0, .* not "1280,0"/],
+    [
+      ['--color-scheme', 'sepia'],
+      /--color-scheme must be "light", "dark" or "light,dark", not "sepia"/
+    ],
+    [['--color-scheme', 'light,sepia'], /--color-scheme must be .* not "light,sepia"/],
     [['--wait-timeout', '500'], /--wait-timeout needs --wait-for/],
     [['--wait-for', '#x', '--wait-timeout', '0'], /--wait-timeout must be a whole number above 0/],
     [['--wait-for', '  '], /--wait-for needs a selector/]

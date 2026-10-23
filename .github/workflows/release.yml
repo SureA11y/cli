@@ -33,15 +33,18 @@ jobs:
             exit 1
           fi
 
-      # The engine ships from a different repo, so a CLI tag can front-run it.
-      - name: Verify the declared @surea11y/core range resolves on the registry
+      # The engine and binding-base ship from other repos, so a CLI tag can
+      # front-run them.
+      - name: Verify the declared @surea11y ranges resolve on the registry
         run: |
-          RANGE="$(node -p "require('./package.json').dependencies['@surea11y/core']")"
-          if ! npm view "@surea11y/core@$RANGE" version >/dev/null 2>&1; then
-            echo "::error::@surea11y/core@$RANGE does not resolve on npm — publish the engine first"
-            exit 1
-          fi
-          echo "resolves to: $(npm view "@surea11y/core@$RANGE" version | tail -1)"
+          for PKG in @surea11y/core @surea11y/binding-base; do
+            RANGE="$(node -p "require('./package.json').dependencies['$PKG']")"
+            if ! npm view "$PKG@$RANGE" version >/dev/null 2>&1; then
+              echo "::error::$PKG@$RANGE does not resolve on npm — publish it first"
+              exit 1
+            fi
+            echo "$PKG resolves to: $(npm view "$PKG@$RANGE" version | tail -1)"
+          done
 
       - run: npm run lint
       - run: npm run format:check

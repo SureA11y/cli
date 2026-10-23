@@ -236,6 +236,7 @@ test('--width and --color-scheme set the page, and the result says so', { skip }
   assert.equal(plain.checksResults[0].outcome, 'notApplicable');
   assert.deepEqual(plain.engine.environment.viewport, { width: 1280, height: 720 });
   assert.equal(plain.engine.environment.colorScheme, 'light');
+  assert.equal(plain.conditionRuns, undefined, 'one width and scheme is one scan');
 
   const dark = JSON.parse((await scan('--color-scheme', 'dark', '--json')).stdout);
   assert.equal(dark.checksResults[0].occurrences.length, 1);
@@ -290,6 +291,65 @@ test(
     );
     assert.equal(alone.engine.environment.liveRegionHook, 'early');
     assert.equal(alone.engine.environment.internalsHook, undefined);
+  }
+);
+
+const NEEDS_CONDITIONS =
+  typeof require('@surea11y/binding-base').mergeConditionResults !== 'function' &&
+  'needs @surea11y/binding-base 1.6.0';
+
+test(
+  'several widths and color schemes scan every combination, merged into one result',
+  { skip: skip || NEEDS_CONDITIONS },
+  async () => {
+    // Visible only in dark mode, and only on a narrow viewport.
+    fs.writeFileSync(
+      path.join(dir, 'themed-all.html'),
+      `<!doctype html><html lang="en"><head><title>Themed</title><style>
+        .dark-only, .narrow-only { display: none; }
+        @media (prefers-color-scheme: dark) { .dark-only { display: block; } }
+        @media (max-width: 400px) { .narrow-only { display: block; } }
+      </style></head><body><main><h1>Themed</h1>
+        <img class="dark-only" src="moon.png"><img class="narrow-only" src="menu.png">
+      </main></body></html>`
+    );
+    const flags = ['--browser', '--rules', 'img-alt-present', '--width', '1280,320'];
+    const json = await run(
+      ['scan', 'themed-all.html', ...flags, '--color-scheme', 'light,dark', '--json'],
+      dir
+    );
+    assert.equal(json.status, 1, json.stderr);
+    const result = JSON.parse(json.stdout);
+    assert.deepEqual(
+      result.conditionRuns.map((r) => [
+        r.condition,
+        r.environment.viewport.width,
+        r.environment.colorScheme
+      ]),
+      [
+        ['light, width 1280', 1280, 'light'],
+        ['dark, width 1280', 1280, 'dark'],
+        ['light, width 320', 320, 'light'],
+        ['dark, width 320', 320, 'dark']
+      ]
+    );
+    const check = result.checksResults[0];
+    assert.equal(check.outcome, 'fail');
+    assert.deepEqual(
+      check.occurrences.map((o) => [o.selector, o.conditions]),
+      [
+        ['html > body > main > img:nth-of-type(1)', ['dark, width 1280', 'dark, width 320']],
+        ['html > body > main > img:nth-of-type(2)', ['light, width 320', 'dark, width 320']]
+      ]
+    );
+
+    const summary = await run(['scan', 'themed-all.html', ...flags], dir);
+    assert.equal(summary.status, 1);
+    assert.match(
+      summary.stdout,
+      /browser: 2 scans, merged\n {4}width 1280: 1280×720, light color scheme\n {4}width 320: 320×720, light color scheme\n/
+    );
+    assert.match(summary.stdout, /seen in: width 320\n/);
   }
 );
 

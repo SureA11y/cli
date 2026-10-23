@@ -31,8 +31,8 @@ With `--browser`, it opens each page in headless Chromium instead, runs its scri
 | `--browser` | Scan each page in headless Chromium, running its scripts, through Playwright, which you install. See [In a real browser](#in-a-real-browser) below. |
 | `--wait-for <selector>` | With `--browser`: wait until an element matching `<selector>` is on the page and shown, then scan. See [Waiting for content](#waiting-for-content) below. |
 | `--wait-timeout <ms>` | With `--wait-for`: how long to wait, in milliseconds (default `30000`). |
-| `--width <px>` | With `--browser`: the viewport width (default `1280`; `320` lays the page out at the width WCAG 1.4.10 Reflow uses). See [Width and color scheme](#width-and-color-scheme) below. |
-| `--color-scheme <light\|dark>` | With `--browser`: emulate the user's light or dark color scheme (`prefers-color-scheme`). |
+| `--width <px>` | With `--browser`: the viewport width (default `1280`; `320` lays the page out at the width WCAG 1.4.10 Reflow uses). Several, comma-separated (`1280,320`), scan the page at each. See [Width and color scheme](#width-and-color-scheme) below. |
+| `--color-scheme <light\|dark>` | With `--browser`: emulate the user's light or dark color scheme (`prefers-color-scheme`); `light,dark` scans in both. |
 | `--no-hooks` | With `--browser`: don't install core's internals and listener hooks before the page's scripts, which a browser scan does by default. See [Web components and listeners added from script](#web-components-and-listeners-added-from-script) below. |
 | `--live-regions` | With `--browser`: also install core's live-region hook before the page's scripts, so status messages the page shows after it loads are checked (`@surea11y/core` 1.14.0). See [Web components and listeners added from script](#web-components-and-listeners-added-from-script) below. |
 | `--fail-on-severity <severity>` | Exit `1` only for a failing rule of this severity or above: `critical`, `serious`, `moderate` or `minor`. Every failure is still reported. See [Failing only on serious problems](#failing-only-on-serious-problems) below. |
@@ -195,7 +195,24 @@ surea11y scan https://example.com/ --browser --color-scheme dark      # the dark
 surea11y scan https://example.com/ --browser --width 320 --color-scheme dark --html dark-mobile.html
 ```
 
-The default is 1280 × 720 in the light scheme. 320 pixels is the width WCAG 1.4.10 (Reflow) asks content to work at, but the engine has no rule for reflow itself yet (content that needs scrolling in two directions): `--width 320` gives the other rules that layout, and the HTML report lets a person check the rest. The summary names what the scan used (`browser: 320×720, dark color scheme`), and the result records it in `engine.environment.viewport` and `.colorScheme`. To check several combinations, run the CLI once for each. A baseline holds the failures found in the combination it was written in, and failures that appear only in another (a cut-off menu at 320 pixels) would be new against it, so keep one baseline file per combination.
+The default is 1280 × 720 in the light scheme. 320 pixels is the width WCAG 1.4.10 (Reflow) asks content to work at, but the engine has no rule for reflow itself yet (content that needs scrolling in two directions): `--width 320` gives the other rules that layout, and the HTML report lets a person check the rest. The summary names what the scan used (`browser: 320×720, dark color scheme`), and the result records it in `engine.environment.viewport` and `.colorScheme`.
+
+### Several widths and color schemes
+
+Give `--width` or `--color-scheme` several values, comma-separated, and each page is scanned in every combination of them, then reported as one result:
+
+```sh
+surea11y scan https://example.com/ --browser --width 1280,320 --color-scheme light,dark   # four scans
+```
+
+The page is loaded once; for each combination the viewport and scheme are changed and the page scanned again, so each extra combination costs a scan, not another page load. The scans are merged the way `.conditions()` merges them in the test bindings:
+
+- A rule's outcome is its worst across the scans, so a contrast failure only in dark mode fails the rule, and the run.
+- Each finding is listed once per element, rule and reason, with the combinations it was seen in. The summary prints them (`seen in: dark, width 1280, dark, width 320`), and `--json` gives them as the occurrence's `conditions`.
+- The summary lists each scan's viewport and scheme, and the result's `conditionRuns` holds each scan's name and `engine.environment`.
+- A combination is named by what varies: `dark`, `width 320`, or `dark, width 320` when both do.
+
+`--html`, `--sarif`, `--junit` and `--earl` report the merged result, one per page as before. One baseline covers every combination, since a finding is listed once however many combinations it was seen in, and matched as any other (by its rule, reason and the element's markup). A single width and scheme is one scan, as before, with no `conditionRuns`.
 
 ### Web components and listeners added from script
 
@@ -450,4 +467,4 @@ Or, since the exit code already reflects pass/fail, just let the command's own e
 
 ## A note on dependencies
 
-This CLI depends on `jsdom` (to parse fetched/read HTML into a DOM) and on `@surea11y/core` (the engine). `--browser` also needs `playwright`, which you install yourself; the CLI never installs a browser. That split is the whole point of shipping the CLI separately: `@surea11y/core` itself has **zero runtime dependencies**, so using the library directly against a DOM you already have — jsdom, a real browser, Playwright, whatever — never pulls in `jsdom` a second time. Install `@surea11y/cli` when you want the command; install `@surea11y/core` when you want the API.
+This CLI depends on `jsdom` (to parse fetched/read HTML into a DOM), on `@surea11y/core` (the engine), and on `@surea11y/binding-base`, which has no dependencies of its own and merges the scans of one page under several widths and color schemes as the test bindings' `.conditions()` does. `--browser` also needs `playwright`, which you install yourself; the CLI never installs a browser. That split is the whole point of shipping the CLI separately: `@surea11y/core` itself has **zero runtime dependencies**, so using the library directly against a DOM you already have — jsdom, a real browser, Playwright, whatever — never pulls in `jsdom` a second time. Install `@surea11y/cli` when you want the command; install `@surea11y/core` when you want the API.
