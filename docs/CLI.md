@@ -33,7 +33,7 @@ With `--browser`, it opens each page in headless Chromium instead, runs its scri
 | `--wait-timeout <ms>` | With `--wait-for`: how long to wait, in milliseconds (default `30000`). |
 | `--width <px>` | With `--browser`: the viewport width (default `1280`; `320` lays the page out at the width WCAG 1.4.10 Reflow uses). See [Width and color scheme](#width-and-color-scheme) below. |
 | `--color-scheme <light\|dark>` | With `--browser`: emulate the user's light or dark color scheme (`prefers-color-scheme`). |
-| `--no-hooks` | With `--browser`: don't install core's internals and listener hooks before the page's scripts, which a browser scan does by default. See [Web components and listeners added from script](#web-components-and-listeners-added-from-script) below. |
+| `--no-hooks` | With `--browser`: don't install core's internals, listener and live-region hooks before the page's scripts, which a browser scan does by default. See [Web components and listeners added from script](#web-components-and-listeners-added-from-script) below. |
 | `--fail-on-severity <severity>` | Exit `1` only for a failing rule of this severity or above: `critical`, `serious`, `moderate` or `minor`. Every failure is still reported. See [Failing only on serious problems](#failing-only-on-serious-problems) below. |
 | `--json` | Print the raw result object (see [`OUTPUT_SCHEMA.md`](https://github.com/SureA11y/core/blob/main/docs/OUTPUT_SCHEMA.md)) instead of a human-readable summary; for several pages, an array of them. |
 | `--locale <locale>` | Output text locale (default `en`) — see [`I18N.md`](https://github.com/SureA11y/core/blob/main/docs/I18N.md). |
@@ -198,12 +198,13 @@ The default is 1280 × 720 in the light scheme. 320 pixels is the width WCAG 1.4
 
 ### Web components and listeners added from script
 
-Two things a page sets up from script can't be read back afterwards: the name, role and states a web component gives itself through a private `ElementInternals`, and the event listeners added with `addEventListener` or an `onclick`-style property. A browser scan installs core's two hooks for them in each page before its scripts run, so the rules judge them too:
+Some things a page sets up from script can't be read back afterwards: the name, role and states a web component gives itself through a private `ElementInternals`, and the event listeners added with `addEventListener` or an `onclick`-style property. A browser scan installs core's two hooks for them in each page before its scripts run, so the rules judge them too:
 
 - **The internals hook.** A custom element that names itself through its internals (`this.#internals.ariaLabel = 'Close'`) is read like any named control, and one that never attached internals is judged by its markup, where it used to be asked about.
 - **The listener hook** (`@surea11y/core` 1.14.0 and later). `click-handler-keyboard-operable` judges a click listener added from script as an inline `onclick`: a `<div role="button" tabindex="0">` with a click listener and no key listener anywhere fails (`CLICK_HANDLER_NO_KEY_LISTENER`), since Enter and Space do nothing on it, where before it wasn't seen at all. `mouse-only-event-handlers` asks about pointer listeners added from script.
+- **The live-region hook** (`@surea11y/core` 1.14.0 and later). It records how the page's live regions were given their text after it loaded, so `live-region-announcements` also asks about a region added with its text already in it (a toast inserted as `<div role="status">Saved</div>`), which screen readers commonly don't announce, and one shown and filled at once. That happens after the load event, so it shows up with `--wait-for`, waiting for the content that brings it. It only observes the page.
 
-The summary names them (`hooks: internals, listeners`), as the result's `engine.environment.internalsHook` and `listenerHook` record them. The page is the scan's own, opened for it and closed after, so wrapping `attachInternals` and `addEventListener` changes nothing anyone uses. For a page whose scripts break when those are wrapped, `--no-hooks` scans without them. See core's [`INTEGRATION.md`](https://github.com/SureA11y/core/blob/main/docs/INTEGRATION.md#reading-private-elementinternals-the-internals-hook) for what each hook does.
+The summary names them (`hooks: internals, listeners, live regions`), as the result's `engine.environment.internalsHook`, `listenerHook` and `liveRegionHook` record them. The page is the scan's own, opened for it and closed after, so wrapping `attachInternals` and `addEventListener` changes nothing anyone uses. For a page whose scripts break when those are wrapped, `--no-hooks` scans without them. See core's [`INTEGRATION.md`](https://github.com/SureA11y/core/blob/main/docs/INTEGRATION.md#reading-private-elementinternals-the-internals-hook) for what each hook does.
 
 ## Baseline / allowlist
 

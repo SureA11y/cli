@@ -57,8 +57,8 @@ Options:
   --wait-timeout <ms>     With --wait-for: how long to wait (default: 30000)
   --width <px>            With --browser: the viewport width (default: 1280; 320 for a phone-sized layout)
   --color-scheme <s>      With --browser: emulate the user's light or dark color scheme
-  --no-hooks              With --browser: don't install core's internals and listener hooks before
-                          the page's scripts (installed by default)
+  --no-hooks              With --browser: don't install core's internals, listener and live-region
+                          hooks before the page's scripts (installed by default)
   --fail-on-severity <s>  Exit 1 only for a failing rule of severity <s> or above: critical, serious,
                           moderate or minor (default: any failure)
   --json                  Print the raw result object as JSON instead of a summary (an array for several pages)
@@ -554,11 +554,17 @@ function printSummary(result, baselineMatch, { compact = false, failOnSeverity =
     );
   }
   // The hooks a browser scan had, as the engine saw them.
-  if (environment && (environment.internalsHook || environment.listenerHook)) {
+  if (
+    environment &&
+    (environment.internalsHook || environment.listenerHook || environment.liveRegionHook)
+  ) {
     const hooks = [
       environment.internalsHook &&
         `internals${environment.internalsHook === 'late' ? ' (late)' : ''}`,
-      environment.listenerHook && `listeners${environment.listenerHook === 'late' ? ' (late)' : ''}`
+      environment.listenerHook &&
+        `listeners${environment.listenerHook === 'late' ? ' (late)' : ''}`,
+      environment.liveRegionHook &&
+        `live regions${environment.liveRegionHook === 'late' ? ' (late)' : ''}`
     ].filter(Boolean);
     process.stdout.write(`  hooks: ${hooks.join(', ')}\n`);
   }
@@ -783,16 +789,19 @@ async function createBrowserScanner(engineOptions, runOnly, args, customRules, p
     }));
   }
   if (packs.length) pageOptions.packs = packs.map((p) => `${p.name}@${p.version}`);
-  // core's internals and listener hooks, run in each page before its own
-  // scripts, so the scan reads the names custom elements set through private
-  // ElementInternals and the listeners the page adds from script. The page
-  // is the scan's own, so wrapping attachInternals and addEventListener
-  // changes nothing anyone uses; --no-hooks leaves them out. Each only where
-  // the installed core has it (the listener hook from 1.14.0).
+  // core's internals, listener and live-region hooks, run in each page
+  // before its own scripts, so the scan reads the names custom elements set
+  // through private ElementInternals, the listeners the page adds from
+  // script, and how its live regions were given their text after it loaded
+  // (content --wait-for waits for). The page is the scan's own, so wrapping
+  // attachInternals and addEventListener changes nothing anyone uses, and
+  // the live-region hook only observes; --no-hooks leaves them out. Each
+  // only where the installed core has it (the listener and live-region
+  // hooks from 1.14.0).
   const core = require('@surea11y/core');
   const hookScripts = args.noHooks
     ? []
-    : [core.internalsHookScript, core.listenerHookScript]
+    : [core.internalsHookScript, core.listenerHookScript, core.liveRegionHookScript]
         .filter((script) => typeof script === 'function')
         .map((script) => script());
 

@@ -247,6 +247,46 @@ test('--width and --color-scheme set the page, and the result says so', { skip }
   assert.match(narrow.stdout, /browser: 320×720, light color scheme/);
 });
 
+// A toast the page adds a moment after it loads, with its text already in
+// it: screen readers commonly don't announce a live region's first content.
+const LATE_TOAST = `<!doctype html><html lang="en"><head><title>App</title></head>
+<body><main><h1>App</h1><div id="slot"></div></main>
+<script>setTimeout(() => {
+  document.getElementById('slot').innerHTML = '<div id="toast" role="status">Saved</div>';
+}, 50);</script>
+</body></html>`;
+
+const HAS_LIVE_REGION_HOOK = typeof require('@surea11y/core').liveRegionHookScript === 'function';
+
+test(
+  '--browser: with the live-region hook, a status region added with its text is asked about',
+  { skip: skip || (!HAS_LIVE_REGION_HOOK && 'needs @surea11y/core 1.14.0') },
+  async () => {
+    fs.writeFileSync(path.join(dir, 'toast.html'), LATE_TOAST);
+    const flags = ['--browser', '--wait-for', '#toast', '--rules', 'live-region-announcements'];
+    const r = await run(['scan', 'toast.html', ...flags, '--json'], dir);
+    assert.equal(r.stderr, '');
+    const result = JSON.parse(r.stdout);
+    assert.equal(result.engine.environment.liveRegionHook, 'early');
+    assert.equal(result.checksResults[0].outcome, 'cantTell');
+    assert.deepEqual(
+      result.checksResults[0].occurrences.map((o) => [
+        o.data.details.reasonCode,
+        o.data.details.text
+      ]),
+      [['LIVE_REGION_INSERTED_WITH_CONTENT', 'Saved']]
+    );
+    const summary = await run(['scan', 'toast.html', ...flags], dir);
+    assert.match(summary.stdout, /hooks: internals, listeners, live regions/);
+    // Without the hooks only the page as it is now is judged: the region passes.
+    const plain = JSON.parse(
+      (await run(['scan', 'toast.html', ...flags, '--no-hooks', '--json'], dir)).stdout
+    );
+    assert.equal(plain.engine.environment.liveRegionHook, undefined);
+    assert.equal(plain.checksResults[0].outcome, 'pass');
+  }
+);
+
 // A copy of the CLI whose node_modules has everything but Playwright.
 test('--browser without Playwright says what to install', async () => {
   const project = fs.mkdtempSync(path.join(os.tmpdir(), 'cli-nopw-'));
@@ -307,6 +347,7 @@ test(
     );
     assert.equal(plain.engine.environment.internalsHook, undefined);
     assert.equal(plain.engine.environment.listenerHook, undefined);
+    assert.equal(plain.engine.environment.liveRegionHook, undefined);
     assert.doesNotMatch(
       (await run(['scan', 'button.html', '--browser', '--no-hooks', ...rules], dir)).stdout,
       /hooks:/
