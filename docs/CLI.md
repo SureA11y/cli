@@ -28,6 +28,8 @@ With `--browser`, it opens each page in headless Chromium instead, runs its scri
 |---|---|
 | `<file-or-url>...` | The pages to scan: one or more local files or HTTP(S) URLs. See [Several pages](#several-pages) below. |
 | `--urls <file>` | Also scan each path or URL listed in `<file>`, one per line; blank lines and `#` comments are skipped. |
+| `--sitemap <url-or-file>` | Also scan the pages a `sitemap.xml` lists, following a sitemap index. See [From a sitemap](#from-a-sitemap) below. |
+| `--max-pages <n>` | With `--sitemap`: scan at most `<n>` of its pages (default `50`). |
 | `--browser` | Scan each page in headless Chromium, running its scripts, through Playwright, which you install. See [In a real browser](#in-a-real-browser) below. |
 | `--wait-for <selector>` | With `--browser`: wait until an element matching `<selector>` is on the page and shown, then scan. See [Waiting for content](#waiting-for-content) below. |
 | `--wait-timeout <ms>` | With `--wait-for`: how long to wait, in milliseconds (default `30000`). |
@@ -109,13 +111,24 @@ criteria (WCAG 2.2 AA):
 
 The heading names the target from the scan (`--wcag`, `--wcag-level`, or what a profile implies). A criterion is *partly checked* when the scan selected some of its checks out, as `--rules contrast-computable` does for 1.4.3, whose other check is `contrast-minimum`: its outcome covers only the checks that ran. `notApplicable` criteria are counted, not listed, and `--compact` shows the whole block as counts. Titles follow `--locale`. A pack's own checklist items are left out of the block; the HTML report shows them. The block never changes the exit code, and `--json` has the same data in `rulesResults`.
 
+## What a run with no failure means
+
+Exit `0` with no `fail` says the automated rules found nothing definite on the pages scanned. It is not a claim that they conform to WCAG, and the summary ends by saying so when nothing failed. A person still checks:
+
+- the `cantTell` findings, which the summary lists as needing human review;
+- that everything works with the keyboard alone;
+- how a screen reader reads the page;
+- the content itself: that text alternatives, headings, labels and link text say what they should.
+
+The [known limitations](https://github.com/SureA11y/core/blob/main/docs/LIMITATIONS.md) list what no rule covers.
+
 ## Exit codes
 
 | Code | Meaning |
 |---|---|
 | `0` | Scan completed, no `fail` outcomes on any page (none at or above `--fail-on-severity`'s level, when given). |
 | `1` | Scan completed, at least one `fail` outcome on some page (at or above `--fail-on-severity`'s level, when given) — the CI-gating case. |
-| `2` | Usage error, or the scan itself couldn't run (bad path/URL, network failure, missing `jsdom`, `--browser` without Playwright or Chromium, a `--urls` file that can't be read or lists nothing, a `--wait-for` element that never showed, a browser-only option without `--browser`), or it would have checked nothing or less than asked: a `--rules`/`--tags` list naming no known rule or tag, a selection whose parts cancel out so that no rule runs (`--rules img-alt-present --exclude-rules img-alt-present`), a `--context` selector that is invalid or matches no element, a custom rule the engine could not run, a pack that can't be found or loaded or that the engine skipped, or a `--profile` that wasn't applied. No report or baseline is written. |
+| `2` | Usage error, or the scan itself couldn't run (bad path/URL, network failure, missing `jsdom`, `--browser` without Playwright or Chromium, a `--urls` file that can't be read or lists nothing, a `--sitemap` that can't be read, isn't a sitemap or lists nothing, `--max-pages` without `--sitemap`, a `--wait-for` element that never showed, a browser-only option without `--browser`), or it would have checked nothing or less than asked: a `--rules`/`--tags` list naming no known rule or tag, a selection whose parts cancel out so that no rule runs (`--rules img-alt-present --exclude-rules img-alt-present`), a `--context` selector that is invalid or matches no element, a custom rule the engine could not run, a pack that can't be found or loaded or that the engine skipped, or a `--profile` that wasn't applied. No report or baseline is written. |
 
 `cantTell` outcomes never affect the exit code — they're printed as a "needs human review" summary, consistent with the manual/`cantTell` mental model in [`TROUBLESHOOTING.md`](https://github.com/SureA11y/core/blob/main/docs/TROUBLESHOOTING.md#should-i-treat-canttell-as-a-failure). If you need `cantTell`-aware gating, use `--json` and inspect `checksResults` yourself, or call the library directly (see [`INTEGRATION.md`](https://github.com/SureA11y/core/blob/main/docs/INTEGRATION.md#ci-gating-a-build-on-the-result)).
 
@@ -155,6 +168,23 @@ https://staging.example.com/account   # behind the build, scanned live
 - `--junit` writes one file. Each page's suites are named after the page (`dist/about.html — WCAG 1.1.1`), and its test cases' class names too (`dist/about.html/wcag-1.1.1`), so a CI's test history keeps pages apart.
 - `--html` writes one report per page: `report.html`, `report-2.html`, ...
 - `--write-baseline` records each entry with its page: a URL as given, a file by its path relative to the working directory, so the baseline matches in another checkout. `--baseline` then matches each page against its own entries, so a known failure on one page doesn't hide the same one on another. An entry with no page, from a baseline written for one page, applies to whatever page is scanned.
+
+### From a sitemap
+
+`--sitemap` scans the pages a site's `sitemap.xml` lists, after any pages named on the command line or in `--urls`:
+
+```sh
+surea11y scan --sitemap https://example.com/sitemap.xml
+surea11y scan --sitemap ./dist/sitemap.xml --max-pages 200 --sarif a11y.sarif
+```
+
+- It takes a URL or a local file, plain or gzipped (`sitemap.xml.gz`).
+- A sitemap index is followed to the sitemaps it names, one level down, as the sitemap protocol allows.
+- A relative `<loc>` resolves against the sitemap's own address, so a local sitemap of relative paths scans the files beside it.
+- A page listed twice, or also named on the command line, is scanned once.
+- `--max-pages` limits how many of its pages are scanned, in the sitemap's order: 50 by default, so a large site doesn't run for hours. When it cuts the list, a line on stderr says so (`sitemap: 312 pages listed, scanning the first 50 (--max-pages 50).`).
+- With `--browser`, each page opens in Chromium as usual.
+- A sitemap that can't be read, isn't one (another root than `<urlset>` or `<sitemapindex>`, or XML that isn't well-formed), or lists no page stops the run with exit `2` before anything is scanned.
 
 ## In a real browser
 
