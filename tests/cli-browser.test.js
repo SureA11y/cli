@@ -277,3 +277,82 @@ test('--browser without Playwright says what to install', async () => {
     fs.rmSync(project, { recursive: true, force: true });
   }
 });
+
+// A custom button given its click listener by the page's script, with no key
+// listener anywhere: Enter and Space do nothing.
+const SCRIPTED_BUTTON = `<!doctype html><html lang="en"><head><title>App</title></head>
+<body><main><h1>App</h1><div id="save" role="button" tabindex="0">Save</div></main>
+<script>document.getElementById('save').addEventListener('click', () => {});</script>
+</body></html>`;
+
+const HAS_LISTENER_HOOK = typeof require('@surea11y/core').listenerHookScript === 'function';
+
+test(
+  "--browser installs core's hooks before the page's scripts, and says so; --no-hooks leaves them out",
+  { skip },
+  async () => {
+    fs.writeFileSync(path.join(dir, 'button.html'), SCRIPTED_BUTTON);
+    // Any rule: the result records the hooks whichever ran.
+    const rules = ['--rules', 'page-title-present'];
+    const hooked = JSON.parse(
+      (await run(['scan', 'button.html', '--browser', ...rules, '--json'], dir)).stdout
+    );
+    assert.equal(hooked.engine.environment.internalsHook, 'early');
+    const summary = await run(['scan', 'button.html', '--browser', ...rules], dir);
+    assert.match(summary.stdout, /hooks: internals/);
+
+    const plain = JSON.parse(
+      (await run(['scan', 'button.html', '--browser', '--no-hooks', ...rules, '--json'], dir))
+        .stdout
+    );
+    assert.equal(plain.engine.environment.internalsHook, undefined);
+    assert.equal(plain.engine.environment.listenerHook, undefined);
+    assert.doesNotMatch(
+      (await run(['scan', 'button.html', '--browser', '--no-hooks', ...rules], dir)).stdout,
+      /hooks:/
+    );
+  }
+);
+
+test(
+  '--browser: with the listener hook, a custom button with a click listener and no key listener fails',
+  { skip: skip || (!HAS_LISTENER_HOOK && 'needs @surea11y/core 1.14.0') },
+  async () => {
+    fs.writeFileSync(path.join(dir, 'button.html'), SCRIPTED_BUTTON);
+    const r = await run(
+      ['scan', 'button.html', '--browser', '--rules', 'click-handler-keyboard-operable', '--json'],
+      dir
+    );
+    assert.equal(r.status, 1, r.stderr);
+    const result = JSON.parse(r.stdout);
+    assert.equal(result.engine.environment.listenerHook, 'early');
+    assert.equal(result.checksResults[0].outcome, 'fail');
+    assert.equal(
+      result.checksResults[0].occurrences[0].data.details.reasonCode,
+      'CLICK_HANDLER_NO_KEY_LISTENER'
+    );
+    const summary = await run(
+      ['scan', 'button.html', '--browser', '--rules', 'click-handler-keyboard-operable'],
+      dir
+    );
+    assert.match(summary.stdout, /hooks: internals, listeners/);
+    // Without the hooks the listener can't be seen, as before.
+    const plain = JSON.parse(
+      (
+        await run(
+          [
+            'scan',
+            'button.html',
+            '--browser',
+            '--no-hooks',
+            '--rules',
+            'click-handler-keyboard-operable',
+            '--json'
+          ],
+          dir
+        )
+      ).stdout
+    );
+    assert.equal(plain.checksResults[0].outcome, 'notApplicable');
+  }
+);

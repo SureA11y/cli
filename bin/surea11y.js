@@ -57,6 +57,8 @@ Options:
   --wait-timeout <ms>     With --wait-for: how long to wait (default: 30000)
   --width <px>            With --browser: the viewport width (default: 1280; 320 for a phone-sized layout)
   --color-scheme <s>      With --browser: emulate the user's light or dark color scheme
+  --no-hooks              With --browser: don't install core's internals and listener hooks before
+                          the page's scripts (installed by default)
   --fail-on-severity <s>  Exit 1 only for a failing rule of severity <s> or above: critical, serious,
                           moderate or minor (default: any failure)
   --json                  Print the raw result object as JSON instead of a summary (an array for several pages)
@@ -185,6 +187,9 @@ function parseArgs(argv) {
         break;
       case '--browser':
         out.browser = true;
+        break;
+      case '--no-hooks':
+        out.noHooks = true;
         break;
       case '--wait-for':
         out.waitFor = argv[++i];
@@ -548,6 +553,15 @@ function printSummary(result, baselineMatch, { compact = false, failOnSeverity =
       `  browser: ${environment.viewport.width}×${environment.viewport.height}${environment.colorScheme ? `, ${environment.colorScheme} color scheme` : ''}\n`
     );
   }
+  // The hooks a browser scan had, as the engine saw them.
+  if (environment && (environment.internalsHook || environment.listenerHook)) {
+    const hooks = [
+      environment.internalsHook &&
+        `internals${environment.internalsHook === 'late' ? ' (late)' : ''}`,
+      environment.listenerHook && `listeners${environment.listenerHook === 'late' ? ' (late)' : ''}`
+    ].filter(Boolean);
+    process.stdout.write(`  hooks: ${hooks.join(', ')}\n`);
+  }
   if (result.engine && result.engine.profile) {
     process.stdout.write(`  profile: ${result.engine.profile}\n`);
   }
@@ -769,6 +783,18 @@ async function createBrowserScanner(engineOptions, runOnly, args, customRules, p
     }));
   }
   if (packs.length) pageOptions.packs = packs.map((p) => `${p.name}@${p.version}`);
+  // core's internals and listener hooks, run in each page before its own
+  // scripts, so the scan reads the names custom elements set through private
+  // ElementInternals and the listeners the page adds from script. The page
+  // is the scan's own, so wrapping attachInternals and addEventListener
+  // changes nothing anyone uses; --no-hooks leaves them out. Each only where
+  // the installed core has it (the listener hook from 1.14.0).
+  const core = require('@surea11y/core');
+  const hookScripts = args.noHooks
+    ? []
+    : [core.internalsHookScript, core.listenerHookScript]
+        .filter((script) => typeof script === 'function')
+        .map((script) => script());
 
   let browser;
   try {
@@ -797,6 +823,7 @@ async function createBrowserScanner(engineOptions, runOnly, args, customRules, p
         ...(args.colorScheme ? { colorScheme: args.colorScheme } : {})
       });
       try {
+        for (const content of hookScripts) await page.addInitScript({ content });
         const response = await page.goto(url, { waitUntil: 'load' });
         if (response && !response.ok() && isUrl(target)) {
           throw new Error(
@@ -980,7 +1007,8 @@ async function runScan(args) {
     ['--wait-for', args.waitFor],
     ['--wait-timeout', args.waitTimeout],
     ['--width', args.width],
-    ['--color-scheme', args.colorScheme]
+    ['--color-scheme', args.colorScheme],
+    ['--no-hooks', args.noHooks]
   ].filter(([, given]) => given !== undefined);
   if (browserOnly.length && !args.browser) {
     process.stderr.write(
