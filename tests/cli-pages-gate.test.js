@@ -242,6 +242,10 @@ test('the browser-only options need --browser, and valid values', () => {
   assert.match(without.stderr, /--width, --color-scheme need --browser/);
   assert.match(run(['scan', 'opts.html', '--wait-for', '#x']).stderr, /--wait-for needs --browser/);
   assert.match(run(['scan', 'opts.html', '--no-hooks']).stderr, /--no-hooks needs --browser/);
+  assert.match(
+    run(['scan', 'opts.html', '--live-regions']).stderr,
+    /--live-regions needs --browser/
+  );
   const cases = [
     [['--width', '0'], /--width must be a whole number above 0, not "0"/],
     [['--width', 'wide'], /--width must be a whole number above 0, not "wide"/],
