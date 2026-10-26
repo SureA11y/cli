@@ -23,11 +23,13 @@ Requires Node.js `^20.19.0 || ^22.13.0 || >=24.0.0`.
 ```
 $ surea11y scan ./index.html
 
-surea11y scan: file:///path/to/index.html
-  engine: @surea11y/core 1.13.1
-  pass: 15   fail: 4   cantTell: 4   notApplicable: 111
 
-  occurrences by tier: fail: 4   cantTell: 5
+surea11y scan: file:///path/to/index.html
+  engine: @surea11y/core 1.14.0
+  pass: 16   fail: 4   cantTell: 4   notApplicable: 121
+
+  occurrences by tier: fail: 4   cantTell: 4
+  needs review: likely fail: 1   likely pass: 0   needs a person: 3
 
 FAIL (4 rule(s)):
 
@@ -59,26 +61,42 @@ FAIL (4 rule(s)):
       hint: Add an alt attribute that says what the image shows, or alt="" if
       the image is purely decorative.
 
-cantTell — needs human review (4 rule(s)): contrast-computable, link-name-quality,
+LIKELY FAIL — confirm (1 occurrence(s)):
+  - heading-order (minor): html > body > main > h3
+    This heading jumps from level 1 to level 3, skipping a level.
+    why: The heading skips a level after the one before it.
+
+cantTell — needs human review (4 rule(s)): heading-order, link-name-quality,
 manual-review, page-title-patterns
 
 criteria (WCAG 2.2):
   fail       1.1.1 Non-text content: text alternatives; 1.4.3 Contrast: minimum;
              1.4.6 Contrast: enhanced; 4.1.2 Name, role, value: accessible name
-  cantTell   2.1.1 Keyboard; 2.4.2 Page titled; 2.4.3 Focus order; 2.4.4 Link
-             Purpose (In Context); 2.4.7 Focus visible; 2.4.9 Link Purpose (Link Only)
-  pass       1.3.1 Info and Relationships; 2.2.2 Pause, Stop, Hide; 2.4.1 Bypass
-             Blocks; 3.1.1 Language of page; 4.1.2 Name, role, value: ARIA validity
-  notApplicable: 19
-  A criterion that passes here means the checks that ran found nothing in it, not
-  that the page conforms.
+  cantTell   1.2.1 Audio-only and video-only (prerecorded): transcript; 1.2.2
+             Captions (Prerecorded); 1.3.1 Info and Relationships; 1.3.4
+             Orientation; 1.3.5 Identify Input Purpose; 1.4.1 Use of Color;
+             1.4.2 Audio Control; 1.4.4 Resize Text; 1.4.5 Images of Text;
+             1.4.12 Text Spacing; 2.1.1 Keyboard; 2.1.3 Keyboard (No Exception);
+             2.2.1 Timing Adjustable; 2.2.2 Pause, Stop, Hide; 2.2.4
+             Interruptions; 2.4.1 Bypass Blocks; 2.4.2 Page titled; 2.4.3 Focus
+             order; 2.4.4 Link Purpose (In Context); 2.4.6 Headings and Labels;
+             2.4.7 Focus visible; 2.4.9 Link Purpose (Link Only); 2.5.8 Target
+             size: minimum; 3.1.1 Language of page; 3.1.2 Language of Parts;
+             3.2.5 Change on Request; 3.3.1 Error Identification; 3.3.2 Labels
+             or Instructions; 3.3.8 Accessible Authentication (Minimum); 4.1.2
+             Name, role, value: ARIA validity; 4.1.3 Status Messages
+  notApplicable: 2
+  A criterion that passes here means the checks that ran found nothing in it,
+  not that the page conforms.
 ```
 
 The `criteria` block reads the same scan by WCAG criterion, the way people usually ask ("does it fail 1.4.3?"). A criterion that only some of its checks decided, because the scan selected the others out (`--rules`, `--tags`), is marked `(partly checked: 1 of 2 checks not selected)`. `--compact` shows the block as counts. A passing criterion means the checks that ran found nothing, not that the page meets it: most criteria need a person to check them.
 
-That last line is the point of the engine: rules that *cannot* be settled from static markup are reported as `cantTell` and routed to a human, instead of being silently dropped or guessed at. `cantTell` never affects the exit code.
+That last line is the point of the engine: rules that *cannot* be settled from static markup are reported as `cantTell` and routed to a human, instead of being silently dropped or guessed at. With `@surea11y/core` 1.14 no criterion is listed as passing yet: one passes only when its rules check all it asks, so where they all pass it is left for a person to check the rest.
 
-Exit code `0` = clean, `1` = at least one `fail` on some page (the CI-gating case; `--fail-on-severity serious` counts only serious and critical ones), `2` = usage error or the scan couldn't run, including a scan that would have checked nothing or less than asked (a `--rules`/`--tags` typo, a `--context` selector that matches nothing, a custom rule or a pack that didn't run, a `--profile` that wasn't applied).
+The questions say more than that. The summary counts them by what a reviewer does with them: *likely fail* (the page's evidence points to a failure: the heading above skips a level), *likely pass*, and *needs a person*, and lists the likely failures with the reason each leans that way. Every question in `--json` and in the reports carries the steps to answer it (`howToCheck`). `cantTell` doesn't affect the exit code, unless you pass `--fail-on-lean`, which fails the run on the likely failures too. See [Questions that likely fail](./docs/CLI.md#questions-that-likely-fail).
+
+Exit code `0` = clean, `1` = at least one `fail` on some page (the CI-gating case; `--fail-on-severity serious` counts only serious and critical ones; `--fail-on-lean` adds the likely failures), `2` = usage error or the scan couldn't run, including a scan that would have checked nothing or less than asked (a `--rules`/`--tags` typo, a `--context` selector that matches nothing, a custom rule or a pack that didn't run, a `--profile` that wasn't applied).
 
 ## Several pages, a severity gate, a real browser
 
@@ -134,6 +152,8 @@ surea11y scan https://app.example.com/ https://app.example.com/settings --browse
 
 Each page opens in headless Chromium, its scripts run, and the scan sees what renders, with a real layout for the rules that measure it. The engine is the same `@surea11y/core` the static scan uses. Every option works with it, reports, baselines, packs and custom rules included.
 
+Before each page loads, the CLI installs core's internals and listener hooks, so the scan also sees what a page does from script: click handlers added with `addEventListener` (a `role="button"` that Enter and Space never reach fails) and names that components set through `ElementInternals`. `--live-regions` adds the live-region hook, for a page that shows a status message by itself after loading: one added with its text already in it, which screen readers commonly don't announce, is asked about. `--no-hooks` scans without the first two. See [Hooks](./docs/CLI.md#hooks).
+
 An app that fetches its data after loading can make the scan wait for it, and the browser can be narrowed to a phone's width or switched to dark mode:
 
 ```sh
@@ -184,6 +204,14 @@ surea11y scan ./dist/index.html --compact --json > result.json
 # Accept today's violations, gate CI only on new ones
 surea11y scan ./dist/index.html --write-baseline baseline.json   # once, commit it
 surea11y scan ./dist/index.html --baseline baseline.json         # in CI, from then on
+
+# Also fail on the questions that likely fail, WCAG rules only, and accept today's
+surea11y scan ./dist/index.html --fail-on-lean --lean-fail-wcag-only
+surea11y scan ./dist/index.html --fail-on-lean --write-baseline baseline.json
+surea11y scan ./dist/index.html --fail-on-lean --baseline baseline.json
+
+# Bring a baseline written by an older core up to its reason codes
+surea11y scan ./dist/index.html --migrate-baseline baseline.json
 
 # Browsable HTML report, and SARIF for GitHub Code Scanning
 surea11y scan ./dist/index.html --html report.html --sarif results.sarif

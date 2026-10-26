@@ -463,3 +463,126 @@ test(
     assert.equal(plain.checksResults[0].outcome, 'notApplicable');
   }
 );
+// --- core 1.14: hooks installed before the page loads, and steps for each question ---
+
+// A button given a click listener from script and no key listener, a status
+// message added with its text, and a switch whose role is set through
+// internals kept in a private field.
+const HOOKED = `<!doctype html><html lang="en"><head><title>Hooked</title></head>
+<body><main><h1>Hooked</h1>
+<div class="save" role="button" tabindex="0">Save</div>
+<x-toggle tabindex="0"></x-toggle>
+<script>
+  document.querySelector('.save').addEventListener('click', () => {});
+  customElements.define('x-toggle', class extends HTMLElement {
+    #internals;
+    constructor() { super(); this.#internals = this.attachInternals(); this.#internals.role = 'switch'; }
+  });
+  addEventListener('load', () => setTimeout(() => {
+    document.querySelector('main').insertAdjacentHTML('beforeend', '<div role="status">Saved</div>');
+  }));
+</script>
+</main></body></html>`;
+
+const HOOK_RULES = [
+  '--rules',
+  'click-handler-keyboard-operable,live-region-announcements,binary-control-name-present'
+];
+
+const codesOf = (result, ruleId) =>
+  (result.checksResults.find((r) => r.ruleId === ruleId).occurrences || []).map(
+    (o) => o.data && o.data.details && o.data.details.reasonCode
+  );
+
+test(
+  '--browser --live-regions installs the three hooks before the page loads, and says so',
+  { skip },
+  async () => {
+    fs.writeFileSync(path.join(dir, 'hooked.html'), HOOKED);
+    const r = await run(
+      ['scan', 'hooked.html', '--browser', '--live-regions', ...HOOK_RULES, '--json'],
+      dir
+    );
+    assert.equal(r.status, 1, r.stderr);
+    const result = JSON.parse(r.stdout);
+    const env = result.engine.environment;
+    assert.equal(env.internalsHook, 'early');
+    assert.equal(env.listenerHook, 'early');
+    assert.equal(env.liveRegionHook, 'early');
+    assert.deepEqual(codesOf(result, 'click-handler-keyboard-operable'), [
+      'CLICK_HANDLER_NO_KEY_LISTENER'
+    ]);
+    assert.deepEqual(codesOf(result, 'live-region-announcements'), [
+      'LIVE_REGION_INSERTED_WITH_CONTENT'
+    ]);
+    assert.equal(
+      result.checksResults.find((c) => c.ruleId === 'binary-control-name-present').outcome,
+      'fail'
+    );
+
+    const summary = await run(
+      ['scan', 'hooked.html', '--browser', '--live-regions', ...HOOK_RULES],
+      dir
+    );
+    assert.match(summary.stdout, /\n {2}hooks: internals, listeners, live regions\n/);
+    assert.match(
+      summary.stdout,
+      /LIKELY FAIL — confirm \(1 occurrence\(s\)\):\n {2}- live-region-announcements/
+    );
+  }
+);
+
+test('--no-hooks scans the page without them', { skip }, async () => {
+  fs.writeFileSync(path.join(dir, 'unhooked.html'), HOOKED);
+  const r = await run(
+    ['scan', 'unhooked.html', '--browser', '--no-hooks', ...HOOK_RULES, '--json'],
+    dir
+  );
+  assert.equal(r.status, 0, r.stderr);
+  const result = JSON.parse(r.stdout);
+  const env = result.engine.environment;
+  assert.equal(env.internalsHook, undefined);
+  assert.equal(env.listenerHook, undefined);
+  assert.equal(env.liveRegionHook, undefined);
+  for (const c of result.checksResults) assert.notEqual(c.outcome, 'fail', c.ruleId);
+  const summary = await run(
+    ['scan', 'unhooked.html', '--browser', '--no-hooks', ...HOOK_RULES],
+    dir
+  );
+  assert.doesNotMatch(summary.stdout, /hooks:/);
+});
+
+test(
+  '--browser results carry the steps for each question, as a static scan does',
+  { skip },
+  async () => {
+    fs.writeFileSync(
+      path.join(dir, 'questions.html'),
+      '<!doctype html><html lang="en"><head><title>Questions</title></head><body><main><h1>Q</h1><h3>Details</h3></main></body></html>'
+    );
+    const args = ['--rules', 'heading-order', '--json'];
+    const steps = (stdout) =>
+      JSON.parse(stdout).checksResults[0].occurrences.map((o) => o.howToCheck);
+    const browser = steps(
+      (await run(['scan', 'questions.html', '--browser', ...args], dir)).stdout
+    );
+    const staticScan = steps((await run(['scan', 'questions.html', ...args], dir)).stdout);
+    assert.equal(browser.length, 1);
+    assert.ok(Array.isArray(browser[0].steps) && browser[0].steps.length > 0);
+    assert.equal(typeof browser[0].passWhen, 'string');
+    assert.deepEqual(browser, staticScan);
+  }
+);
+
+test('--browser --fail-on-lean gates on the likely failures the hooks find', { skip }, async () => {
+  fs.writeFileSync(path.join(dir, 'lean-hooked.html'), HOOKED);
+  const rules = ['--rules', 'live-region-announcements', '--live-regions'];
+  const plain = await run(['scan', 'lean-hooked.html', '--browser', ...rules], dir);
+  assert.equal(plain.status, 0, plain.stderr);
+  const gated = await run(
+    ['scan', 'lean-hooked.html', '--browser', ...rules, '--fail-on-lean'],
+    dir
+  );
+  assert.equal(gated.status, 1, gated.stderr);
+  assert.match(gated.stdout, /--fail-on-lean: 1 of them fails the run/);
+});

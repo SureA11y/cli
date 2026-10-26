@@ -35,9 +35,11 @@ With `--browser`, it opens each page in headless Chromium instead, runs its scri
 | `--wait-timeout <ms>` | With `--wait-for`: how long to wait, in milliseconds (default `30000`). |
 | `--width <px>` | With `--browser`: the viewport width (default `1280`; `320` lays the page out at the width WCAG 1.4.10 Reflow uses). Several, comma-separated (`1280,320`), scan the page at each. See [Width and color scheme](#width-and-color-scheme) below. |
 | `--color-scheme <light\|dark>` | With `--browser`: emulate the user's light or dark color scheme (`prefers-color-scheme`); `light,dark` scans in both. |
-| `--no-hooks` | With `--browser`: don't install core's internals and listener hooks before the page's scripts, which a browser scan does by default. See [Web components and listeners added from script](#web-components-and-listeners-added-from-script) below. |
-| `--live-regions` | With `--browser`: also install core's live-region hook before the page's scripts, so status messages the page shows after it loads are checked (`@surea11y/core` 1.14.0). See [Web components and listeners added from script](#web-components-and-listeners-added-from-script) below. |
+| `--no-hooks` | With `--browser`: don't install core's internals and listener hooks before the page's scripts, which a browser scan does by default. See [Hooks](#hooks) below. |
+| `--live-regions` | With `--browser`: also install core's live-region hook before the page's scripts, so status messages the page shows after it loads are checked (`@surea11y/core` 1.14.0). See [Hooks](#hooks) below. |
 | `--fail-on-severity <severity>` | Exit `1` only for a failing rule of this severity or above: `critical`, `serious`, `moderate` or `minor`. Every failure is still reported. See [Failing only on serious problems](#failing-only-on-serious-problems) below. |
+| `--fail-on-lean` | Also exit `1` for a question that likely fails: a `cantTell` finding whose lean points to fail. `--sarif` and `--junit` then report such findings as errors and failures. See [Questions that likely fail](#questions-that-likely-fail) below. |
+| `--lean-fail-wcag-only` | With `--fail-on-lean`: count only the likely failures of rules mapped to a WCAG criterion in the scan's target, leaving out the best-practice rules'. |
 | `--json` | Print the raw result object (see [`OUTPUT_SCHEMA.md`](https://github.com/SureA11y/core/blob/main/docs/OUTPUT_SCHEMA.md)) instead of a human-readable summary; for several pages, an array of them. |
 | `--locale <locale>` | Output text locale (default `en`) — see [`I18N.md`](https://github.com/SureA11y/core/blob/main/docs/I18N.md). |
 | `--rules <ids>` | Comma-separated rule IDs — only run these. |
@@ -51,8 +53,9 @@ With `--browser`, it opens each page in headless Chromium instead, runs its scri
 | `--custom-rules <path>` | Load runtime custom rules from a local JS file. Repeatable. See [Custom rules](#custom-rules) below. |
 | `--pack <name-or-path>` | Load a pack: rules, a standard or a checklist, and their profiles, from a package installed in the project or a local file. Repeatable. See [Packs](#packs) below. |
 | `--profile <name>` | Run a conformance profile, such as `en301549-v4.1.1` or a pack's own. A profile that isn't applied exits `2`. See [`ENGINE_OPTIONS.md`](https://github.com/SureA11y/core/blob/main/docs/ENGINE_OPTIONS.md#conformance-profiles). |
-| `--write-baseline <path>` | Write every current `fail` occurrence to `<path>`; never fails the build. See [`BASELINE.md`](https://github.com/SureA11y/core/blob/main/docs/BASELINE.md). |
-| `--baseline <path>` | Gate only on occurrences not already recorded in `<path>`. See [`BASELINE.md`](https://github.com/SureA11y/core/blob/main/docs/BASELINE.md). |
+| `--write-baseline <path>` | Write every current `fail` occurrence to `<path>`, and with `--fail-on-lean` every likely failure too; never fails the build. See [`BASELINE.md`](https://github.com/SureA11y/core/blob/main/docs/BASELINE.md). |
+| `--baseline <path>` | Gate only on occurrences not already recorded in `<path>` (with `--fail-on-lean`, likely failures too). See [`BASELINE.md`](https://github.com/SureA11y/core/blob/main/docs/BASELINE.md). |
+| `--migrate-baseline <path>` | Rewrite the baseline at `<path>` under the reason codes core gives now, against the pages given, or, with none, only the moves that need no scan; never fails the build and accepts nothing new. See [Upgrading a baseline](#upgrading-a-baseline) below. |
 | `--html <path>` | Write a self-contained, browsable HTML report to `<path>`; for several pages, one each: `<path>`, then `<name>-2.<ext>`, `<name>-3.<ext>`... See [`REPORT.md`](https://github.com/SureA11y/core/blob/main/docs/REPORT.md). |
 | `--sarif <path>` | Write a SARIF 2.1.0 report to `<path>` (e.g. for GitHub Code Scanning). See [`SARIF.md`](https://github.com/SureA11y/core/blob/main/docs/SARIF.md). |
 | `--junit <path>` | Write a JUnit XML report to `<path>` (for the test views of GitLab, Azure DevOps, Jenkins, CircleCI). See [JUnit report](#junit-report) below. |
@@ -105,13 +108,12 @@ After the rules, the summary lists the WCAG criteria the scan reports, grouped b
 ```
 criteria (WCAG 2.2 AA):
   fail       1.1.1 Non-text content: text alternatives
-  cantTell   1.4.3 Contrast: minimum (partly checked: 1 of 2 checks not selected)
-  pass       2.4.2 Page titled
+  cantTell   1.4.3 Contrast: minimum (partly checked: 1 of 2 checks not selected); 2.4.2 Page titled
   notApplicable: 15
   A criterion that passes here means the checks that ran found nothing in it, not that the page conforms.
 ```
 
-The heading names the target from the scan (`--wcag`, `--wcag-level`, or what a profile implies). A criterion is *partly checked* when the scan selected some of its checks out, as `--rules contrast-computable` does for 1.4.3, whose other check is `contrast-minimum`: its outcome covers only the checks that ran. `notApplicable` criteria are counted, not listed, and `--compact` shows the whole block as counts. Titles follow `--locale`. A pack's own checklist items are left out of the block; the HTML report shows them. The block never changes the exit code, and `--json` has the same data in `rulesResults`.
+The heading names the target from the scan (`--wcag`, `--wcag-level`, or what a profile implies). A criterion is *partly checked* when the scan selected some of its checks out, as `--rules contrast-computable` does for 1.4.3, whose other check is `contrast-minimum`: its outcome covers only the checks that ran. `notApplicable` criteria are counted, not listed, and `--compact` shows the whole block as counts. With `@surea11y/core` 1.14, a criterion passes only when its rules check all it asks, and none does yet, so no criterion is listed under `pass`: where every rule of a criterion passes, it is `cantTell`, for a person to check the rest. Titles follow `--locale`. A pack's own checklist items are left out of the block; the HTML report shows them. The block never changes the exit code, and `--json` has the same data in `rulesResults`.
 
 ## What a run with no failure means
 
@@ -128,13 +130,13 @@ The [known limitations](https://github.com/SureA11y/core/blob/main/docs/LIMITATI
 
 | Code | Meaning |
 |---|---|
-| `0` | Scan completed, no `fail` outcomes on any page (none at or above `--fail-on-severity`'s level, when given). |
-| `1` | Scan completed, at least one `fail` outcome on some page (at or above `--fail-on-severity`'s level, when given) — the CI-gating case. |
-| `2` | Usage error, or the scan itself couldn't run (bad path/URL, network failure, missing `jsdom`, `--browser` without Playwright or Chromium, a `--urls` file that can't be read or lists nothing, a `--sitemap` that can't be read, isn't a sitemap or lists nothing, `--max-pages` without `--sitemap`, a `--wait-for` element that never showed, a browser-only option without `--browser`), or it would have checked nothing or less than asked: a `--rules`/`--tags` list naming no known rule or tag, a selection whose parts cancel out so that no rule runs (`--rules img-alt-present --exclude-rules img-alt-present`), a `--context` selector that is invalid or matches no element, a custom rule the engine could not run, a pack that can't be found or loaded or that the engine skipped, or a `--profile` that wasn't applied. No report or baseline is written. |
+| `0` | Scan completed, no `fail` outcomes on any page (none at or above `--fail-on-severity`'s level, when given), and with `--fail-on-lean` no likely failures. `--write-baseline` and `--migrate-baseline` exit `0` whatever the scan found. |
+| `1` | Scan completed, at least one `fail` outcome on some page (at or above `--fail-on-severity`'s level, when given), or with `--fail-on-lean` a likely failure — the CI-gating case. |
+| `2` | Usage error, or the scan itself couldn't run (bad path/URL, network failure, missing `jsdom`, `--browser` without Playwright or Chromium, a `--urls` file that can't be read or lists nothing, a `--sitemap` that can't be read, isn't a sitemap or lists nothing, `--max-pages` without `--sitemap`, a `--wait-for` element that never showed, a browser-only option without `--browser`, `--lean-fail-wcag-only` without `--fail-on-lean`, two of `--baseline`, `--write-baseline` and `--migrate-baseline` together, a baseline file that can't be read), or it would have checked nothing or less than asked: a `--rules`/`--tags` list naming no known rule or tag, a selection whose parts cancel out so that no rule runs (`--rules img-alt-present --exclude-rules img-alt-present`), a `--context` selector that is invalid or matches no element, a custom rule the engine could not run, a pack that can't be found or loaded or that the engine skipped, or a `--profile` that wasn't applied. No report or baseline is written. |
 
-`cantTell` outcomes never affect the exit code — they're printed as a "needs human review" summary, consistent with the manual/`cantTell` mental model in [`TROUBLESHOOTING.md`](https://github.com/SureA11y/core/blob/main/docs/TROUBLESHOOTING.md#should-i-treat-canttell-as-a-failure). If you need `cantTell`-aware gating, use `--json` and inspect `checksResults` yourself, or call the library directly (see [`INTEGRATION.md`](https://github.com/SureA11y/core/blob/main/docs/INTEGRATION.md#ci-gating-a-build-on-the-result)).
+`cantTell` outcomes don't affect the exit code — they're printed as a "needs human review" summary, consistent with the manual/`cantTell` mental model in [`TROUBLESHOOTING.md`](https://github.com/SureA11y/core/blob/main/docs/TROUBLESHOOTING.md#should-i-treat-canttell-as-a-failure) — unless `--fail-on-lean` is given, and then only those that likely fail count (see [Questions that likely fail](#questions-that-likely-fail)). For other `cantTell`-aware gating, use `--json` and inspect `checksResults` yourself, or call the library directly (see [`INTEGRATION.md`](https://github.com/SureA11y/core/blob/main/docs/INTEGRATION.md#ci-gating-a-build-on-the-result)).
 
-With `--baseline`, exit code `1` means at least one *new* (not-yet-baselined) `fail` occurrence, not any `fail` occurrence — see [`BASELINE.md`](https://github.com/SureA11y/core/blob/main/docs/BASELINE.md).
+With `--baseline`, exit code `1` means at least one *new* (not-yet-baselined) `fail` occurrence, not any `fail` occurrence, and with `--fail-on-lean` at least one new likely failure — see [`BASELINE.md`](https://github.com/SureA11y/core/blob/main/docs/BASELINE.md).
 
 With several pages, one that can't be scanned stops the run with `2`, naming the page, and nothing is written.
 
@@ -146,7 +148,59 @@ Every rule result has a severity: `critical`, `serious`, `moderate` or `minor` (
 surea11y scan ./dist/index.html --fail-on-severity serious
 ```
 
-A failing rule below the level is still listed, with "below --fail-on-severity serious, does not fail the run" next to it, and is in every report and in `--json` as usual. With `--baseline`, only *new* failures at the level count. `fail` keeps its meaning, a definite violation; the option only chooses which ones stop the build. The summary lists failing rules most severe first.
+A failing rule below the level is still listed, with "below --fail-on-severity serious, does not fail the run" next to it, and is in every report and in `--json` as usual. With `--baseline`, only *new* failures at the level count. With `--fail-on-lean`, so do only the likely failures of rules at the level or above. `fail` keeps its meaning, a definite violation; the option only chooses which ones stop the build. The summary lists failing rules most severe first.
+
+## Questions that likely fail
+
+A `cantTell` finding is a question for a person: the engine couldn't prove the answer from the page. Some questions have evidence that points one way, and the engine says so with a **lean** (`toward: 'fail'` or `'pass'`, `why`, and sometimes a `caution` saying what could make it wrong); the outcome stays `cantTell`. Each question also carries `howToCheck`: the steps to answer it, and what a person sees if it passes or fails. See core's [`LEANS.md`](https://github.com/SureA11y/core/blob/main/docs/LEANS.md).
+
+The summary counts the questions by review group, as core's HTML report groups them (`reviewGroupOf`), and lists the first five that likely fail, most severe first, each with its lean's reason:
+
+```
+  occurrences by tier: fail: 0   cantTell: 4
+  needs review: likely fail: 2   likely pass: 0   needs a person: 2
+
+LIKELY FAIL — confirm (2 occurrence(s)):
+  - invalid-field-error-message (serious): #email
+    This field is marked invalid, but the error message aria-errormessage names is hidden.
+    why: The error message tied to the field is hidden, so the error is probably not told.
+  - heading-order (minor): html > body > main > h3
+    This heading jumps from level 1 to level 3, skipping a level.
+    why: The heading skips a level after the one before it.
+```
+
+*Likely fail* is a question whose evidence points to a failure, *likely pass* one whose evidence points to a pass, and *needs a person* one with no evidence either way. A likely failure is still a question: a reviewer who checks it and finds it passes is right.
+
+### Gating on likely failures
+
+By default, questions never fail the run. `--fail-on-lean` makes the likely failures fail it too, exit `1`, without failing on every question:
+
+```sh
+surea11y scan ./dist/index.html --fail-on-lean
+surea11y scan ./dist/index.html --fail-on-lean --lean-fail-wcag-only --junit a11y.junit.xml --sarif a11y.sarif
+```
+
+- The findings it counts are core's `leaningFailures(result)`: those of a rule whose every WCAG criterion is outside the scan's target are left out. The best-practice rules' facts lean fail without condition (a skipped heading level in `heading-order`), so `--lean-fail-wcag-only` counts only the likely failures of rules mapped to a WCAG criterion in the target (`{ wcagOnly: true }`). Above, `--fail-on-lean` counts both findings, and with `--lean-fail-wcag-only` only `invalid-field-error-message`'s (3.3.1).
+- With `--fail-on-severity`, only the likely failures of rules at that severity or above count.
+- `--junit` reports a rule with a likely failure as a failing test (`leanFailAs: 'failure'`), saying why it likely fails, the lean's caution and the steps to confirm it, and `--sarif` raises each likely failure to `error` (`leanFailAs: 'error'`). Both follow `--lean-fail-wcag-only` (`leanFailWcagOnly`). Without `--fail-on-lean`, they report questions as before: skipped tests, and SARIF results below `error`.
+- The summary says how many of the likely failures listed fail the run (`--fail-on-lean: 1 of them fails the run`), and with several pages the closing line counts the pages "with failures or likely failures".
+- New leans arrive in minor releases of core, so an upgrade can turn a build red with nothing changed on the page. Accept the likely failures a page has with a baseline, below, or pin core's version.
+
+### Likely failures in a baseline
+
+Given with `--fail-on-lean`, `--write-baseline` also records each likely failure that `--fail-on-lean` would count, as an entry marked `"lean": "fail"` after the failures (`buildBaselineEntries(result, { leanFail: true })`), and `--baseline` then gates only on new ones (`matchBaseline(result, entries, { leanFail: true })`):
+
+```sh
+surea11y scan ./dist/index.html --fail-on-lean --write-baseline baseline.json   # once, commit the file
+surea11y scan ./dist/index.html --fail-on-lean --baseline baseline.json         # in CI
+```
+
+```
+baseline: 0 known, 0 new, 0 stale (no longer detected)
+baseline likely failures: 2 known, 0 new, 0 stale (no longer detected)
+```
+
+An entry marked `lean: 'fail'` matches only a finding that still leans fail, with the same identity; a plain entry only a failure. The summary lists the new likely failures, and `--json` has the counts in `baseline.leanFail` (`{ total, knownCount, newCount, newOccurrences, staleCount }`); with `--lean-fail-wcag-only`, `newOccurrences` and `newCount` hold only those it counts. Without `--fail-on-lean`, such entries are ignored, and `--write-baseline` writes failures only. `--sarif` and `--junit` read them too: under `--fail-on-lean` a known likely failure stays a `warning` in SARIF and a skipped test in JUnit. See [`BASELINE.md`](https://github.com/SureA11y/core/blob/main/docs/BASELINE.md#findings-that-lean-fail).
 
 ## Several pages
 
@@ -201,8 +255,22 @@ surea11y scan https://app.example.com/ --browser
 - Playwright is not a dependency of the CLI: install it in your project, where the CLI finds it. Without it, or without its Chromium, `--browser` exits `2` saying what to install. `CHROMIUM_EXECUTABLE_PATH` points it at another Chromium build.
 - The engine in the page is the browser bundle of the same `@surea11y/core` the CLI uses for static scans, so both modes judge with one engine version; only how the page is rendered differs.
 - Every option works as in a static scan, packs and custom rules included: packs are loaded into the page as core's `packScript`, and custom rules as their source.
+- Each question (`cantTell` finding) gets the steps to answer it, `howToCheck`, as in a static scan. The engine in the page leaves them out to stay small; the CLI adds them in Node with core's `addHowToCheck`, with your packs' rules' steps too, before printing `--json` or the summary and writing any report.
+- Core's internals and listener hooks are installed before the page loads, unless you pass `--no-hooks`, and the live-region hook with `--live-regions`. See [Hooks](#hooks).
 - The engine is loaded by evaluating it, not with a script tag, so a page whose Content Security Policy forbids inline scripts is still scanned. A custom rule given as a function is passed as source and needs `eval`, which such a policy may forbid; the engine then skips it and says so, and the run exits `2`.
 - Only the top document is scanned; frames inside it are not, for now. For more control over the browser (logging in, clicking through a flow, every frame), use a binding such as `@surea11y/playwright` in your own test.
+
+### Hooks
+
+Some of what a page does can't be read once it has run: listeners it added from script, `ElementInternals` a component keeps in a private field, what its live regions were given. Core has an opt-in hook for each, a script that must run before the page's own. `--browser` installs the internals and listener hooks with Playwright's `addInitScript`, which runs them in every frame before the page's scripts, since the CLI is an audit tool and core's hooks are meant for test and audit runs; `--live-regions` adds the live-region hook. `--no-hooks` leaves out the internals and listener hooks.
+
+- **Internals** (`internalsHookScript()`): reads names, states and roles a custom element sets through `ElementInternals` kept in a private field (`this.#internals.ariaLabel = 'Close'`). The name rules (`button-name-present`, `binary-control-name-present` and the other `*-name-present` rules, `empty-heading`) and `aria-required-attr` then decide what they asked about (`name_internals`, `state_internals`), and an element whose role is set only there is checked like any other with that role.
+- **Listener** (`listenerHookScript()`): records the click, key, focus, pointer and paste listeners the page adds from script. `click-handler-keyboard-operable` then judges an element given a click listener from script, and fails a control in the tab order that no key or focus listener serves (`CLICK_HANDLER_NO_KEY_LISTENER`): a `<div role="button" tabindex="0">` that Enter and Space do nothing on, which without the hook isn't seen at all. `mouse-only-event-handlers`, `password-paste-enabled`, `widget-keyboard-focusable`, `css-focus-indicator-suppressed`, `focus-order-semantics` and `skip-link` lean differently with what it saw.
+- **Live region, with `--live-regions`** (`liveRegionHookScript()`): records what the page's live regions are given from the load event on. `live-region-announcements` (4.1.3) then also asks about a region added with its text already in it (`LIVE_REGION_INSERTED_WITH_CONTENT`, a toast inserted as `<div role="status">Saved</div>`) or shown and filled at once (`LIVE_REGION_SHOWN_AND_FILLED`), which screen readers commonly don't announce, and leans fail for a region behind a modal dialog that was given text while the dialog was open. It's off by default: the CLI doesn't use the page, so on an app that renders after it loads, the hook would mostly see live regions rendered with their first content ("Loading…", "3 items in cart"), the app at rest rather than a status message. Turn it on for a page that shows a status message by itself after loading, and use `--wait-for` to wait for it. It only observes the page; `--no-hooks` doesn't turn it off.
+
+The result records each hook the page ran in `engine.environment.internalsHook`, `.listenerHook` and `.liveRegionHook`: `'early'` when installed before the page's scripts, as here, `'late'` after, or absent without it. The summary names them (`hooks: internals, listeners`, and `live regions` with `--live-regions`; `(late)` after one installed late). Only an early hook proves that something is missing, such as a key listener. Core's [`INTEGRATION.md`](https://github.com/SureA11y/core/blob/main/docs/INTEGRATION.md#seeing-listeners-added-from-script-the-listener-hook) says what each hook does, and its [binding authors' guide](https://github.com/SureA11y/core/blob/main/docs/BINDING_AUTHORS_GUIDE.md#what-each-hook-changes) lists every reason code each one decides or changes.
+
+The page can notice them: `addEventListener`, `removeEventListener`, the `on…` setters and `attachInternals` are wrapped (the page gets the same results and errors), and each hook keeps its record under a global symbol any script in the page can read. The page is the scan's own, opened for it and closed after, so this changes nothing anyone uses. Scan with `--no-hooks` to see the page as it runs without them, for a page whose scripts break when those methods are wrapped, or to compare. A static scan runs no page script, so it has no hooks, and `--no-hooks` or `--live-regions` without `--browser` exits `2`.
 
 ### Waiting for content
 
@@ -244,15 +312,6 @@ The page is loaded once; for each combination the viewport and scheme are change
 
 `--html`, `--sarif`, `--junit` and `--earl` report the merged result, one per page as before. One baseline covers every combination, since a finding is listed once however many combinations it was seen in, and matched as any other (by its rule, reason and the element's markup). A single width and scheme is one scan, as before, with no `conditionRuns`.
 
-### Web components and listeners added from script
-
-Some things a page sets up from script can't be read back afterwards: the name, role and states a web component gives itself through a private `ElementInternals`, and the event listeners added with `addEventListener` or an `onclick`-style property. A browser scan installs core's two hooks for them in each page before its scripts run, so the rules judge them too:
-
-- **The internals hook.** A custom element that names itself through its internals (`this.#internals.ariaLabel = 'Close'`) is read like any named control, and one that never attached internals is judged by its markup, where it used to be asked about.
-- **The listener hook** (`@surea11y/core` 1.14.0 and later). `click-handler-keyboard-operable` judges a click listener added from script as an inline `onclick`: a `<div role="button" tabindex="0">` with a click listener and no key listener anywhere fails (`CLICK_HANDLER_NO_KEY_LISTENER`), since Enter and Space do nothing on it, where before it wasn't seen at all. `mouse-only-event-handlers` asks about pointer listeners added from script.
-- **The live-region hook, with `--live-regions`** (`@surea11y/core` 1.14.0 and later). It records how the page's live regions were given their text after it loaded, so `live-region-announcements` also asks about a region added with its text already in it (a toast inserted as `<div role="status">Saved</div>`), which screen readers commonly don't announce, and one shown and filled at once. It's off by default: the CLI doesn't use the page, so on an app that renders after it loads, the hook would mostly see live regions rendered with their first content ("Loading…", "3 items in cart"), the app at rest rather than a status message. Turn it on for a page that shows a status message by itself after loading, and use `--wait-for` to wait for it. It only observes the page; `--no-hooks` doesn't turn it off.
-
-The summary names them (`hooks: internals, listeners`, and `live regions` with `--live-regions`), as the result's `engine.environment.internalsHook`, `listenerHook` and `liveRegionHook` record them. The page is the scan's own, opened for it and closed after, so wrapping `attachInternals` and `addEventListener` changes nothing anyone uses. For a page whose scripts break when those are wrapped, `--no-hooks` scans without them. See core's [`INTEGRATION.md`](https://github.com/SureA11y/core/blob/main/docs/INTEGRATION.md#reading-private-elementinternals-the-internals-hook) for what each hook does.
 
 ## Baseline / allowlist
 
@@ -263,7 +322,18 @@ surea11y scan ./dist/index.html --write-baseline baseline.json   # once, commit 
 surea11y scan ./dist/index.html --baseline baseline.json         # in CI, from then on
 ```
 
-See [`BASELINE.md`](https://github.com/SureA11y/core/blob/main/docs/BASELINE.md) for the matching semantics, file format, and known limitations.
+See [`BASELINE.md`](https://github.com/SureA11y/core/blob/main/docs/BASELINE.md) for the matching semantics, file format, and known limitations. To accept the likely failures a page has as well, see [Likely failures in a baseline](#likely-failures-in-a-baseline).
+
+### Upgrading a baseline
+
+A finding's identity includes its reason code, and a minor release of core can give a finding a new one: `img-alt-present`'s missing `alt` was `DEFAULT` in 1.13 and is `TEXT_ALTERNATIVE_MISSING` in 1.14. A baseline written by the release before still matches such a finding, for one minor release, through core's table of moves; it needs updating before the next (see [`BASELINE.md`](https://github.com/SureA11y/core/blob/main/docs/BASELINE.md#upgrading)). Regenerating it with `--write-baseline` writes every finding under its current code, but also accepts whatever the upgrade newly reports. `--migrate-baseline` rewrites the codes and accepts nothing new:
+
+```sh
+surea11y scan ./dist/index.html --migrate-baseline baseline.json   # against a scan of the page
+surea11y scan --migrate-baseline baseline.json                     # without one
+```
+
+It rewrites the file in place with core's `migrateBaselineEntries`, keeping every other entry, field and the rest of the file as they were, and says on stderr how many entries changed. Given the pages, it scans them first, and an entry whose code was split in two takes the code its finding has now: an entry that names a page is migrated against that page's scan, and one that names none against the only page scanned. Without pages, it makes only the moves it can tell without the finding, a code the rule no longer gives that moved to a single new one. Like `--write-baseline`, it never fails the build: the summary or `--json` is printed for the pages scanned, and the run exits `0`. It can't be given with `--baseline` or `--write-baseline`. Commit the rewritten file, and look at its diff.
 
 ## Packs
 
@@ -351,13 +421,14 @@ npx surea11y scan ./page.html --pack ./acme-policy-pack.js --profile acme-web-20
 
 ```
 surea11y scan: file:///path/to/page.html
-  engine: @surea11y/core 1.13.1
+  engine: @surea11y/core 1.14.0
   WCAG level reported: AA
   profile: acme-web-2026
   packs: @acme/a11y-policy@1.0.0
-  pass: 7   fail: 2   cantTell: 6   notApplicable: 91
+  pass: 9   fail: 2   cantTell: 5   notApplicable: 99
 
-  occurrences by tier: fail: 2   cantTell: 8
+  occurrences by tier: fail: 2   cantTell: 7
+  needs review: likely fail: 0   likely pass: 0   needs a person: 7
 
 FAIL (2 rule(s)):
 
@@ -371,13 +442,12 @@ FAIL (2 rule(s)):
       This <img> has no alt attribute.
       hint: Add an alt attribute that says what the image shows, or alt="" if the image is purely decorative.
 
-cantTell — needs human review (6 rule(s)): contrast-computable, manual-review, media-alternative-transcript-evidence, no-autoplay-audio, page-title-patterns, video-caption
+cantTell — needs human review (5 rule(s)): manual-review, media-alternative-transcript-evidence, no-autoplay-audio, page-title-patterns, video-caption
 
 criteria (WCAG 2.2 AA):
   fail       1.1.1 Non-text content: text alternatives
-  cantTell   1.2.1 Audio-only and video-only (prerecorded): transcript; 1.2.2 Captions (Prerecorded); 1.4.2 Audio Control; 1.4.3 Contrast: minimum; 2.1.1 Keyboard; 2.4.2 Page titled; 2.4.3 Focus order; 2.4.7 Focus visible
-  pass       1.3.1 Info and Relationships; 2.2.2 Pause, Stop, Hide; 2.4.1 Bypass Blocks; 3.1.1 Language of page; 4.1.2 Name, role, value: accessible name
-  notApplicable: 15
+  cantTell   1.2.1 Audio-only and video-only (prerecorded): transcript; 1.2.2 Captions (Prerecorded); 1.3.1 Info and Relationships; 1.3.4 Orientation; 1.3.5 Identify Input Purpose; 1.4.1 Use of Color; 1.4.2 Audio Control; 1.4.3 Contrast: minimum; 1.4.4 Resize Text; 1.4.5 Images of Text; 1.4.12 Text Spacing; 2.1.1 Keyboard; 2.2.1 Timing Adjustable; 2.2.2 Pause, Stop, Hide; 2.4.1 Bypass Blocks; 2.4.2 Page titled; 2.4.3 Focus order; 2.4.6 Headings and Labels; 2.4.7 Focus visible; 2.5.8 Target size: minimum; 3.1.1 Language of page; 3.1.2 Language of Parts; 3.3.1 Error Identification; 3.3.2 Labels or Instructions; 3.3.8 Accessible Authentication (Minimum); 4.1.2 Name, role, value: accessible name; 4.1.2 Name, role, value: ARIA validity; 4.1.3 Status Messages
+  notApplicable: 3
   A criterion that passes here means the checks that ran found nothing in it, not that the page conforms.
 ```
 
@@ -441,7 +511,7 @@ For a browsable view of a scan's results — hero summary, WCAG rollup grouped b
 surea11y scan ./dist/index.html --html report.html
 ```
 
-Open `report.html` directly from disk; no server, no external assets. Works alongside any other output mode. See [`REPORT.md`](https://github.com/SureA11y/core/blob/main/docs/REPORT.md).
+Open `report.html` directly from disk; no server, no external assets. The findings that need review are grouped as likely fails, likely passes and those that need a person, each with the steps to check it. Works alongside any other output mode. See [`REPORT.md`](https://github.com/SureA11y/core/blob/main/docs/REPORT.md).
 
 ## SARIF report
 
@@ -451,7 +521,7 @@ For GitHub Code Scanning or another SARIF-consuming dashboard:
 surea11y scan ./dist/index.html --sarif results.sarif
 ```
 
-Works alongside any other output mode, and alongside `--baseline` (already-known `fail` occurrences are omitted from the SARIF output rather than re-reported). See [`SARIF.md`](https://github.com/SureA11y/core/blob/main/docs/SARIF.md).
+Works alongside any other output mode, and alongside `--baseline` (already-known `fail` occurrences are omitted from the SARIF output rather than re-reported). Each question's result carries its lean in `properties.lean` and its steps in `properties.howToCheck`; with `--fail-on-lean`, a likely failure is an `error` (see [Gating on likely failures](#gating-on-likely-failures)). See [`SARIF.md`](https://github.com/SureA11y/core/blob/main/docs/SARIF.md).
 
 ## JUnit report
 
@@ -461,7 +531,7 @@ For CI systems that show JUnit XML in their own test views (GitLab's merge reque
 surea11y scan ./dist/index.html --junit a11y.junit.xml
 ```
 
-Each WCAG criterion becomes a test suite, named `WCAG 1.4.3` in every locale (the translated title is the suite's `title` property), and each rule a test case: a `fail` rule is a failing test, a `cantTell` rule a skipped one (it needs human review, so it never turns the report red), and `notApplicable` rules are left out. With `--baseline`, a rule whose every failure is already recorded in the baseline is reported as skipped, not failing. A `--rules` or `--tags` scan has a suite for each criterion its rules belong to. With `--wcag-level`, criteria above the level get no suite. The report never changes the exit code. See [`JUNIT.md`](https://github.com/SureA11y/core/blob/main/docs/JUNIT.md) for the full mapping.
+Each WCAG criterion becomes a test suite, named `WCAG 1.4.3` in every locale (the translated title is the suite's `title` property), and each rule a test case: a `fail` rule is a failing test, a `cantTell` rule a skipped one (it needs human review, so it never turns the report red), and `notApplicable` rules are left out. With `--baseline`, a rule whose every failure is already recorded in the baseline is reported as skipped, not failing. A `--rules` or `--tags` scan has a suite for each criterion its rules belong to. With `--wcag-level`, criteria above the level get no suite. With `--fail-on-lean`, a rule with a likely failure is a failing test, saying why it likely fails and how to confirm it (see [Gating on likely failures](#gating-on-likely-failures)). The report never changes the exit code. See [`JUNIT.md`](https://github.com/SureA11y/core/blob/main/docs/JUNIT.md) for the full mapping.
 
 For example, in GitLab CI:
 
