@@ -19,7 +19,11 @@ const fs = require('fs');
 const path = require('path');
 
 const pkg = require('../package.json');
-const { buildBaselineEntries, matchBaseline } = require('@surea11y/core/baseline');
+const {
+  buildBaselineEntries,
+  matchBaseline,
+  migrateBaselineEntries
+} = require('@surea11y/core/baseline');
 const { renderHtmlReport } = require('@surea11y/core/report');
 const { renderSarifReport } = require('@surea11y/core/sarif');
 const { renderJunitReport } = require('@surea11y/core/junit');
@@ -67,6 +71,8 @@ Options:
                           the page shows after it loads (with --wait-for)
   --fail-on-severity <s>  Exit 1 only for a failing rule of severity <s> or above: critical, serious,
                           moderate or minor (default: any failure)
+  --fail-on-lean          Also exit 1 for a question that likely fails (its lean points to fail)
+  --lean-fail-wcag-only   With --fail-on-lean: only the likely failures of rules mapped to a WCAG criterion
   --json                  Print the raw result object as JSON instead of a summary (an array for several pages)
   --locale <locale>       Locale for output text (default: en)
   --rules <ids>           Comma-separated rule IDs to run (only these)
@@ -81,8 +87,12 @@ Options:
   --custom-rules <path>   Load runtime custom rules from a JS file (repeatable)
   --pack <name-or-path>   Load a pack (rules, a standard, its profiles), by package name or file (repeatable)
   --profile <name>        Run a conformance profile (e.g. en301549-v4.1.1, or a pack's own)
-  --write-baseline <path> Write every current "fail" occurrence to <path>; never fails the build
+  --write-baseline <path> Write every current "fail" occurrence to <path> (with --fail-on-lean, every
+                          likely failure too); never fails the build
   --baseline <path>       Gate only on occurrences not already recorded in <path>
+  --migrate-baseline <path>
+                          Rewrite the baseline at <path> under the reason codes core gives now, against
+                          the pages given (or, with none, only the moves that need no scan)
   --html <path>           Write a self-contained, browsable HTML report to <path> (several pages:
                           <path>, then <name>-2.<ext>, <name>-3.<ext>...)
   --sarif <path>          Write a SARIF 2.1.0 report to <path> (for GitHub Code Scanning etc.)
@@ -93,9 +103,9 @@ Options:
 
 Exit codes:
   0  scan completed, no "fail" outcomes (or no *new* ones, with --baseline; or none at
-     --fail-on-severity's level), on every page
+     --fail-on-severity's level), and with --fail-on-lean no likely failures, on every page
   1  scan completed, at least one "fail" outcome (or *new* one, with --baseline; at or
-     above --fail-on-severity's level), on any page
+     above --fail-on-severity's level), or with --fail-on-lean a likely failure, on any page
   2  usage error or the scan itself could not run (bad path/URL, network failure,
      a --rules/--tags list naming no rule or tag, or a selection that runs no
      rule, a --context selector that is invalid or matches nothing, a custom
@@ -110,12 +120,16 @@ Examples:
   surea11y scan https://app.example.com/orders --browser --wait-for "#orders-table"
   surea11y scan ./index.html --browser --width 320 --color-scheme dark
   surea11y scan ./index.html --fail-on-severity serious
+  surea11y scan ./index.html --fail-on-lean --lean-fail-wcag-only --junit a11y.junit.xml
+  surea11y scan https://app.example.com/ --browser --no-hooks
   surea11y scan https://example.com/ --wcag 2.2 --wcag-level AA
   surea11y scan ./index.html --tags forms --rules contrast-computable --include-mode or
   surea11y scan ./index.html --rules contrast-computable --wcag-level AA
   surea11y scan ./index.html --json > result.json
   surea11y scan ./index.html --write-baseline baseline.json
   surea11y scan ./index.html --baseline baseline.json
+  surea11y scan ./index.html --fail-on-lean --write-baseline baseline.json
+  surea11y scan ./index.html --migrate-baseline baseline.json
   surea11y scan ./index.html --html report.html
   surea11y scan ./index.html --baseline baseline.json --sarif results.sarif
   surea11y scan ./index.html --junit a11y.junit.xml
@@ -221,6 +235,15 @@ function parseArgs(argv) {
         break;
       case '--fail-on-severity':
         out.failOnSeverity = argv[++i];
+        break;
+      case '--fail-on-lean':
+        out.failOnLean = true;
+        break;
+      case '--lean-fail-wcag-only':
+        out.leanFailWcagOnly = true;
+        break;
+      case '--migrate-baseline':
+        out.migrateBaseline = argv[++i];
         break;
       case '-h':
       case '--help':
@@ -524,7 +547,35 @@ function printCriteria(result, { compact = false } = {}) {
   );
 }
 
-function printSummary(result, baselineMatch, { compact = false, failOnSeverity = null } = {}) {
+// The review groups of the occurrences that need review, as core's HTML
+// report names them.
+const REVIEW_GROUPS = [
+  ['leanFail', 'likely fail'],
+  ['leanPass', 'likely pass'],
+  ['open', 'needs a person']
+];
+
+// The likely failures that fail the run under --fail-on-lean: core's
+// leaningFailures (with --lean-fail-wcag-only, those of rules mapped to a
+// WCAG criterion in the target), at or above --fail-on-severity's level.
+function gatingLeaningFailures(result, args) {
+  const { leaningFailures } = require('@surea11y/core');
+  const severities = severityOf(result);
+  return leaningFailures(result, { wcagOnly: Boolean(args.leanFailWcagOnly) }).filter((f) =>
+    countsForGate(severities[f.ruleId], args.failOnSeverity)
+  );
+}
+
+function severityOf(result) {
+  return Object.fromEntries(result.checksResults.map((r) => [r.ruleId, r.severity]));
+}
+
+function printSummary(
+  result,
+  baselineMatch,
+  { compact = false, failOnSeverity = null, failOnLean = false, ...args } = {}
+) {
+  const { reviewGroupOf } = require('@surea11y/core');
   function getOccurrenceOutcome(ruleResult, occurrence) {
     const occurrenceOutcome =
       occurrence &&
@@ -604,9 +655,25 @@ function printSummary(result, baselineMatch, { compact = false, failOnSeverity =
   process.stdout.write(
     `  pass: ${byOutcome.pass}   fail: ${byOutcome.fail}   cantTell: ${byOutcome.cantTell}   notApplicable: ${byOutcome.notApplicable}\n\n`
   );
+  const leanFails = [];
+  const reviewCounts = { leanFail: 0, leanPass: 0, open: 0 };
+  for (const r of result.checksResults) {
+    for (const occ of Array.isArray(r.occurrences) ? r.occurrences : []) {
+      const group = reviewGroupOf(r, occ);
+      if (!Object.prototype.hasOwnProperty.call(reviewCounts, group)) continue;
+      reviewCounts[group] += 1;
+      if (group === 'leanFail') leanFails.push({ check: r, occ });
+    }
+  }
   process.stdout.write(
-    `  occurrences by tier: fail: ${occurrenceTierCounts.fail}   cantTell: ${occurrenceTierCounts.cantTell}\n\n`
+    `  occurrences by tier: fail: ${occurrenceTierCounts.fail}   cantTell: ${occurrenceTierCounts.cantTell}\n`
   );
+  if (occurrenceTierCounts.cantTell) {
+    process.stdout.write(
+      `  needs review: ${REVIEW_GROUPS.map(([group, label]) => `${label}: ${reviewCounts[group]}`).join('   ')}\n`
+    );
+  }
+  process.stdout.write('\n');
 
   // Most severe first, then by rule.
   const fails = result.checksResults
@@ -644,6 +711,34 @@ function printSummary(result, baselineMatch, { compact = false, failOnSeverity =
     process.stdout.write('\n');
   }
 
+  // The questions whose evidence points to a failure, most severe first, each
+  // with its lean's reason: the ones to check first.
+  if (leanFails.length) {
+    leanFails.sort(
+      (a, b) =>
+        severityRank(b.check.severity) - severityRank(a.check.severity) ||
+        a.check.ruleId.localeCompare(b.check.ruleId)
+    );
+    process.stdout.write(`LIKELY FAIL — confirm (${leanFails.length} occurrence(s)):\n`);
+    for (const { check, occ } of leanFails.slice(0, 5)) {
+      process.stdout.write(
+        `  - ${check.ruleId} (${check.severity}): ${occ.selector || '(no selector)'}\n    ${occ.summary}\n`
+      );
+      if (occ.lean && occ.lean.why) process.stdout.write(`    why: ${occ.lean.why}\n`);
+      if (occ.lean && occ.lean.caution) process.stdout.write(`    caution: ${occ.lean.caution}\n`);
+    }
+    if (leanFails.length > 5) {
+      process.stdout.write(`  ... and ${leanFails.length - 5} more\n`);
+    }
+    if (failOnLean && !baselineMatch) {
+      const gating = gatingLeaningFailures(result, { failOnSeverity, ...args }).length;
+      process.stdout.write(
+        `  --fail-on-lean: ${gating} of them fail${gating === 1 ? 's' : ''} the run\n`
+      );
+    }
+    process.stdout.write('\n');
+  }
+
   const cantTellRuleIds = new Set();
   for (const r of result.checksResults) {
     if (!Array.isArray(r.occurrences)) continue;
@@ -673,6 +768,25 @@ function printSummary(result, baselineMatch, { compact = false, failOnSeverity =
       }
       if (baselineMatch.newOccurrences.length > 5) {
         process.stdout.write(`  ... and ${baselineMatch.newOccurrences.length - 5} more\n`);
+      }
+    }
+    const lean = baselineMatch.leanFail;
+    if (lean) {
+      process.stdout.write(
+        `baseline likely failures: ${lean.knownCount} known, ${lean.newCount} new, ${lean.staleCount} stale (no longer detected)\n`
+      );
+      if (lean.newCount) {
+        process.stdout.write(
+          `\nNEW likely failures (not in baseline, ${lean.newCount} occurrence(s)):\n`
+        );
+        for (const occ of lean.newOccurrences.slice(0, 5)) {
+          process.stdout.write(
+            `  - ${occ.ruleId}: ${occ.selector || '(no selector)'}\n    ${occ.summary}\n`
+          );
+        }
+        if (lean.newOccurrences.length > 5) {
+          process.stdout.write(`  ... and ${lean.newOccurrences.length - 5} more\n`);
+        }
       }
     }
     process.stdout.write('\n');
@@ -913,6 +1027,10 @@ const VIEWPORT_HEIGHT = 720;
 // judge with one engine. Packs go in as core's packScript, custom rules as
 // their source (functions can't cross into the page). Every frame but the top
 // one is left out for now.
+//
+// Core's hooks are installed as init scripts, which run in every frame before
+// the page's own scripts (see hookScripts below). The engine in the page
+// gives no howToCheck; it is added here, in Node.
 async function createBrowserScanner(engineOptions, runOnly, args, customRules, packs) {
   let chromium;
   try {
@@ -1089,7 +1207,7 @@ async function createBrowserScanner(engineOptions, runOnly, args, customRules, p
       err.fromEngine = true;
       throw err;
     }
-    return outcome.result;
+    return core.addHowToCheck(outcome.result, { packs });
   }
 }
 
@@ -1155,6 +1273,65 @@ function mergeJunit(texts, pages) {
   ].join('\n');
 }
 
+// --baseline, --write-baseline and --migrate-baseline each say what the run
+// does with a baseline, so only one can be given.
+function checkBaselineModes(args) {
+  const given = [
+    ['--baseline', args.baseline],
+    ['--write-baseline', args.writeBaseline],
+    ['--migrate-baseline', args.migrateBaseline]
+  ].filter(([, value]) => value !== undefined);
+  if (given.length < 2) return true;
+  const flags = given.map(([flag]) => flag);
+  process.stderr.write(
+    `Error: ${flags.slice(0, -1).join(', ')} and ${flags[flags.length - 1]} cannot be used together in the same run. See --help.\n`
+  );
+  process.exitCode = 2;
+  return false;
+}
+
+// Rewrites a baseline under the reason codes core gives now
+// (migrateBaselineEntries), keeping everything else in the file. Each entry
+// is migrated against the result of its page: an entry naming a page against
+// that page's, one naming none against the only page scanned. With no
+// result, only the moves core can tell without the finding are made. Nothing
+// new is accepted.
+function migrateBaselineFile(file, pages) {
+  const baseline = loadBaselineFile(file);
+  const resultFor = (entry) => {
+    const page =
+      entry && entry.page
+        ? pages.find((p) => p.page === entry.page)
+        : pages.length === 1
+          ? pages[0]
+          : null;
+    return page ? page.result : null;
+  };
+  const groups = new Map();
+  baseline.entries.forEach((entry, i) => {
+    const result = resultFor(entry);
+    if (!groups.has(result)) groups.set(result, []);
+    groups.get(result).push(i);
+  });
+  const entries = baseline.entries.slice();
+  for (const [result, indexes] of groups) {
+    const migrated = migrateBaselineEntries(
+      indexes.map((i) => baseline.entries[i]),
+      result || undefined
+    );
+    indexes.forEach((i, n) => {
+      entries[i] = migrated[n];
+    });
+  }
+  const changed = entries.filter(
+    (e, i) => e && baseline.entries[i] && e.reasonCode !== baseline.entries[i].reasonCode
+  ).length;
+  fs.writeFileSync(file, JSON.stringify({ ...baseline, entries }, null, 2) + '\n');
+  process.stderr.write(
+    `Migrated ${changed} of ${entries.length} baseline entr${entries.length === 1 ? 'y' : 'ies'} to the current reason codes${pages.length ? '' : ' (no scan: only the moves that need none)'}: ${file}\n`
+  );
+}
+
 async function runScan(args) {
   // --max-pages limits what --sitemap adds: a whole number above 0.
   if (args.maxPages !== undefined) {
@@ -1180,6 +1357,20 @@ async function runScan(args) {
   } catch (err) {
     process.stderr.write(`Error: ${formatError(err)}\n`);
     process.exitCode = 2;
+    return;
+  }
+  // A baseline can be migrated without a scan: only the moves that need no
+  // finding are made then.
+  if (!targets.length && args.migrateBaseline) {
+    if (!checkBaselineModes(args)) return;
+    try {
+      migrateBaselineFile(args.migrateBaseline, []);
+    } catch (err) {
+      process.stderr.write(`Error: ${formatError(err)}\n`);
+      process.exitCode = 2;
+      return;
+    }
+    process.exitCode = 0;
     return;
   }
   if (!targets.length) {
@@ -1301,18 +1492,20 @@ async function runScan(args) {
     return;
   }
 
-  if (args.baseline && args.writeBaseline) {
-    process.stderr.write(
-      'Error: --baseline and --write-baseline cannot be used together in the same run. See --help.\n'
-    );
+  if (args.leanFailWcagOnly && !args.failOnLean) {
+    process.stderr.write('Error: --lean-fail-wcag-only needs --fail-on-lean. See --help.\n');
     process.exitCode = 2;
     return;
   }
 
+  if (!checkBaselineModes(args)) return;
+
   let baselineFile = null;
-  if (args.baseline) {
+  if (args.baseline || args.migrateBaseline) {
     try {
-      baselineFile = loadBaselineFile(args.baseline);
+      // Read now, so a file that can't be migrated stops the run before the scan.
+      if (args.migrateBaseline) loadBaselineFile(args.migrateBaseline);
+      else baselineFile = loadBaselineFile(args.baseline);
     } catch (err) {
       process.stderr.write(`Error: ${formatError(err)}\n`);
       process.exitCode = 2;
@@ -1397,7 +1590,7 @@ async function runScan(args) {
       const file = numberedPath(args.html, i + 1);
       fs.writeFileSync(
         file,
-        renderHtmlReport(result, { title: `surea11y scan report — ${target}` })
+        renderHtmlReport(result, { title: `surea11y scan report — ${target}`, packs })
       );
       process.stderr.write(`Wrote HTML report to: ${file}\n`);
     });
@@ -1408,7 +1601,11 @@ async function runScan(args) {
       renderSarifReport(result, {
         toolVersion: pkg.version,
         informationUri: (pkg.homepage || '').replace(/#.*$/, ''),
-        baselineEntries: entriesFor(page)
+        baselineEntries: entriesFor(page),
+        packs,
+        ...(args.failOnLean
+          ? { leanFailAs: 'error', leanFailWcagOnly: Boolean(args.leanFailWcagOnly) }
+          : {})
       })
     );
     fs.writeFileSync(args.sarif, several ? mergeSarif(texts) : texts[0]);
@@ -1417,7 +1614,13 @@ async function runScan(args) {
 
   if (args.junit) {
     const texts = pages.map(({ result, page }) =>
-      renderJunitReport(result, { baselineEntries: entriesFor(page) })
+      renderJunitReport(result, {
+        baselineEntries: entriesFor(page),
+        packs,
+        ...(args.failOnLean
+          ? { leanFailAs: 'failure', leanFailWcagOnly: Boolean(args.leanFailWcagOnly) }
+          : {})
+      })
     );
     fs.writeFileSync(
       args.junit,
@@ -1434,9 +1637,25 @@ async function runScan(args) {
   const printJson = (values) =>
     process.stdout.write(JSON.stringify(several ? values : values[0], null, 2) + '\n');
 
+  if (args.migrateBaseline) {
+    try {
+      migrateBaselineFile(args.migrateBaseline, pages);
+    } catch (err) {
+      process.stderr.write(`Error: ${formatError(err)}\n`);
+      process.exitCode = 2;
+      return;
+    }
+    if (args.json) printJson(pages.map(({ result }) => result));
+    else for (const { result } of pages) printSummary(result, undefined, args);
+    process.exitCode = 0;
+    return;
+  }
+
   if (args.writeBaseline) {
+    // With --fail-on-lean, the likely failures too, as entries marked
+    // lean: 'fail', so that --baseline accepts those the pages have now.
     const perPage = pages.map(({ result, page }) => {
-      const entries = buildBaselineEntries(result);
+      const entries = buildBaselineEntries(result, { leanFail: Boolean(args.failOnLean) });
       return several ? entries.map((e) => ({ ...e, page })) : entries;
     });
     const entries = [].concat(...perPage);
@@ -1453,29 +1672,49 @@ async function runScan(args) {
     } else {
       for (const { result } of pages) printSummary(result, undefined, args);
     }
+    const leanCount = entries.filter((e) => e.lean === 'fail').length;
     process.stderr.write(
-      `Wrote ${entries.length} occurrence(s) to baseline: ${args.writeBaseline}\n`
+      args.failOnLean
+        ? `Wrote ${entries.length - leanCount} failure(s) and ${leanCount} likely failure(s) to baseline: ${args.writeBaseline}\n`
+        : `Wrote ${entries.length} occurrence(s) to baseline: ${args.writeBaseline}\n`
     );
     process.exitCode = 0;
     return;
   }
 
-  const severityOf = (result) =>
-    Object.fromEntries(result.checksResults.map((r) => [r.ruleId, r.severity]));
   let gated = 0;
   const outputs = pages.map(({ result, page }) => {
     if (baselineFile) {
-      const match = matchBaseline(result, entriesFor(page));
+      const match = matchBaseline(result, entriesFor(page), {
+        leanFail: Boolean(args.failOnLean)
+      });
       const severities = severityOf(result);
-      const gating = match.newOccurrences.filter((o) =>
+      let gating = match.newOccurrences.filter((o) =>
         countsForGate(severities[o.ruleId], args.failOnSeverity)
       ).length;
+      if (match.leanFail) {
+        // Only the new likely failures --fail-on-lean gates on: with
+        // --lean-fail-wcag-only, those of rules mapped to a WCAG criterion.
+        const gatingRules = new Set(gatingLeaningFailures(result, args).map((f) => f.ruleId));
+        const newOccurrences = match.leanFail.newOccurrences.filter((o) =>
+          gatingRules.has(o.ruleId)
+        );
+        match.leanFail = {
+          ...match.leanFail,
+          total: match.leanFail.knownCount + newOccurrences.length,
+          newCount: newOccurrences.length,
+          newOccurrences
+        };
+        gating += newOccurrences.length;
+      }
       if (gating) gated += 1;
       return { result, match, json: { ...result, baseline: { mode: 'check', ...match } } };
     }
-    const failing = result.checksResults.some(
-      (r) => r.outcome === 'fail' && countsForGate(r.severity, args.failOnSeverity)
-    );
+    const failing =
+      result.checksResults.some(
+        (r) => r.outcome === 'fail' && countsForGate(r.severity, args.failOnSeverity)
+      ) ||
+      (args.failOnLean && gatingLeaningFailures(result, args).length > 0);
     if (failing) gated += 1;
     return { result, match: undefined, json: result };
   });
@@ -1486,7 +1725,7 @@ async function runScan(args) {
     for (const o of outputs) printSummary(o.result, o.match, args);
     if (several) {
       process.stdout.write(
-        `${pages.length} pages scanned: ${gated} ${args.baseline ? 'with new failures' : 'with failures'}${args.failOnSeverity ? ` at ${args.failOnSeverity} or above` : ''}.\n`
+        `${pages.length} pages scanned: ${gated} ${args.baseline ? 'with new failures' : 'with failures'}${args.failOnLean ? ' or likely failures' : ''}${args.failOnSeverity ? ` at ${args.failOnSeverity} or above` : ''}.\n`
       );
     }
     printNotConformance(pages.map((p) => p.result));

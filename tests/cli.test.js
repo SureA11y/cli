@@ -1304,7 +1304,9 @@ test('CLI: the summary lists the WCAG criteria by outcome, fail before cantTell 
   const block = criteriaBlock(stdout);
   assert.match(block, /^criteria \(WCAG 2\.2 AA\):\n/);
   const at = (label) => block.search(new RegExp(`\\n  ${label} +\\S`));
-  assert.ok(at('fail') > 0 && at('fail') < at('cantTell') && at('cantTell') < at('pass'), block);
+  // Core 1.14 passes no WCAG criterion yet; a pass line, when one comes, follows cantTell.
+  assert.ok(at('fail') > 0 && at('fail') < at('cantTell'), block);
+  assert.ok(at('pass') === -1 || at('cantTell') < at('pass'), block);
   assert.match(block, /\n {2}fail +1\.1\.1 [^\n]*1\.4\.3 /);
   assert.match(block, /\n {2}notApplicable: \d+\n/);
   assert.match(block, /not that the page conforms\.$/);
@@ -1326,7 +1328,7 @@ test('CLI: --compact shows the criteria as counts, and --json carries no summary
   const compact = scanCriteriaPage('criteria-compact', ['--wcag', '2.2', '--compact']);
   assert.match(
     criteriaBlock(compact.stdout),
-    /\n {2}fail: \d+ {3}cantTell: \d+ {3}pass: \d+ {3}notApplicable: \d+\n/
+    /\n {2}fail: \d+ {3}cantTell: \d+( {3}pass: \d+)? {3}notApplicable: \d+\n/
   );
 
   const json = scanCriteriaPage('criteria-json', ['--wcag', '2.2', '--json']);
@@ -1376,4 +1378,320 @@ test('CLI: an empty heading fails a scan with no selection, and not a --wcag one
 
   const wcag = run(['scan', page, '--wcag', '2.2', '--json']);
   assert.ok(!JSON.parse(wcag.stdout).checksResults.some((r) => r.ruleId === 'empty-heading'));
+});
+
+// --- core 1.14: questions that likely fail, gating on them, and baselines ---------------
+
+// heading-order (a best practice, minor) and invalid-field-error-message
+// (3.3.1, serious) both lean fail here; neither fails.
+const LEAN_PAGE = `<!doctype html><html lang="en"><head><title>Sign up</title></head><body><main>
+<h1>Sign up</h1><h3>Your details</h3>
+<label for="email">Email</label><input id="email" aria-invalid="true" aria-errormessage="email-error">
+<p id="email-error" hidden>Enter an email address.</p>
+</main></body></html>`;
+
+const LEAN_RULES = ['--rules', 'heading-order,invalid-field-error-message'];
+
+function leanPage(name, html = LEAN_PAGE) {
+  const page = path.join(tmpDir, `${name}.html`);
+  fs.writeFileSync(page, html);
+  return page;
+}
+
+test('CLI: --help lists the 1.14 options', () => {
+  const { stdout } = run(['--help']);
+  for (const flag of [
+    '--no-hooks',
+    '--fail-on-lean',
+    '--lean-fail-wcag-only',
+    '--migrate-baseline'
+  ]) {
+    assert.ok(stdout.includes(flag), flag);
+  }
+});
+
+test('CLI: the summary counts the questions by review group and lists the likely failures with their reason', () => {
+  const page = leanPage('lean-summary');
+  const { stdout, status } = run(['scan', page]);
+  assert.equal(status, 0, 'questions do not fail the run');
+  assert.match(
+    stdout,
+    /\n {2}needs review: likely fail: 2 {3}likely pass: 0 {3}needs a person: \d+\n/
+  );
+  assert.match(
+    stdout,
+    /LIKELY FAIL — confirm \(2 occurrence\(s\)\):\n {2}- invalid-field-error-message \(serious\): #email\n {4}[^\n]+\n {4}why: [^\n]+\n {2}- heading-order \(minor\): html > body > main > h3\n {4}[^\n]+\n {4}why: The heading skips a level/
+  );
+  assert.doesNotMatch(stdout, /--fail-on-lean:/);
+});
+
+test('CLI: a page with no question prints no review groups', () => {
+  const page = leanPage(
+    'lean-none',
+    '<!doctype html><html lang="en"><head><title>T</title></head><body><img src="x.png"></body></html>'
+  );
+  const { stdout } = run(['scan', page, '--rules', 'img-alt-present']);
+  assert.doesNotMatch(stdout, /needs review:|LIKELY FAIL/);
+});
+
+test('CLI: --fail-on-lean exits 1 on a likely failure; --lean-fail-wcag-only counts only WCAG rules', () => {
+  const page = leanPage('lean-gate');
+  assert.equal(run(['scan', page, ...LEAN_RULES]).status, 0);
+  const gated = run(['scan', page, ...LEAN_RULES, '--fail-on-lean']);
+  assert.equal(gated.status, 1);
+  assert.match(gated.stdout, /--fail-on-lean: 2 of them fail the run/);
+
+  const wcagOnly = run(['scan', page, ...LEAN_RULES, '--fail-on-lean', '--lean-fail-wcag-only']);
+  assert.equal(wcagOnly.status, 1);
+  assert.match(wcagOnly.stdout, /--fail-on-lean: 1 of them fails the run/);
+  const bestPracticeOnly = run([
+    'scan',
+    page,
+    '--rules',
+    'heading-order',
+    '--fail-on-lean',
+    '--lean-fail-wcag-only'
+  ]);
+  assert.equal(bestPracticeOnly.status, 0);
+});
+
+test('CLI: --fail-on-lean follows --fail-on-severity', () => {
+  const page = leanPage('lean-severity');
+  const args = ['scan', page, ...LEAN_RULES, '--fail-on-lean', '--fail-on-severity'];
+  assert.equal(run([...args, 'serious']).status, 1);
+  assert.equal(run([...args, 'critical']).status, 0);
+  const minorOnly = run([
+    'scan',
+    page,
+    '--rules',
+    'heading-order',
+    '--fail-on-lean',
+    '--fail-on-severity',
+    'moderate'
+  ]);
+  assert.equal(minorOnly.status, 0);
+});
+
+test('CLI: --fail-on-lean over several pages counts the pages with likely failures', () => {
+  const lean = leanPage('lean-pages-1');
+  const clean = leanPage(
+    'lean-pages-2',
+    '<!doctype html><html lang="en"><head><title>T</title></head><body><main><h1>T</h1></main></body></html>'
+  );
+  const r = run(['scan', lean, clean, ...LEAN_RULES, '--fail-on-lean']);
+  assert.equal(r.status, 1);
+  assert.match(r.stdout, /2 pages scanned: 1 with failures or likely failures\./);
+});
+
+test('CLI: --lean-fail-wcag-only without --fail-on-lean exits 2', () => {
+  const { status, stderr } = run(['scan', leanPage('lean-wcag-alone'), '--lean-fail-wcag-only']);
+  assert.equal(status, 2);
+  assert.match(stderr, /Error: --lean-fail-wcag-only needs --fail-on-lean\./);
+});
+
+test('CLI: --fail-on-lean makes JUnit fail and SARIF raise the likely failures', () => {
+  const page = leanPage('lean-reports');
+  const junit = path.join(tmpDir, 'lean.junit.xml');
+  const sarif = path.join(tmpDir, 'lean.sarif');
+  const levels = () =>
+    JSON.parse(fs.readFileSync(sarif, 'utf8'))
+      .runs[0].results.map((r) => `${r.ruleId}:${r.level}`)
+      .sort();
+
+  run(['scan', page, ...LEAN_RULES, '--junit', junit, '--sarif', sarif]);
+  assert.doesNotMatch(fs.readFileSync(junit, 'utf8'), /type="leanFail"/);
+  assert.deepEqual(levels(), ['heading-order:warning', 'invalid-field-error-message:warning']);
+
+  run(['scan', page, ...LEAN_RULES, '--fail-on-lean', '--junit', junit, '--sarif', sarif]);
+  assert.equal((fs.readFileSync(junit, 'utf8').match(/type="leanFail"/g) || []).length, 2);
+  assert.deepEqual(levels(), ['heading-order:error', 'invalid-field-error-message:error']);
+
+  run([
+    'scan',
+    page,
+    ...LEAN_RULES,
+    '--fail-on-lean',
+    '--lean-fail-wcag-only',
+    '--junit',
+    junit,
+    '--sarif',
+    sarif
+  ]);
+  assert.equal((fs.readFileSync(junit, 'utf8').match(/type="leanFail"/g) || []).length, 1);
+  assert.deepEqual(levels(), ['heading-order:warning', 'invalid-field-error-message:error']);
+});
+
+test('CLI: --write-baseline --fail-on-lean records the likely failures, and --baseline accepts them', () => {
+  const page = leanPage('lean-baseline');
+  const baseline = path.join(tmpDir, 'lean-baseline.json');
+  const plain = run(['scan', page, ...LEAN_RULES, '--write-baseline', baseline]);
+  assert.equal(plain.status, 0);
+  assert.deepEqual(JSON.parse(fs.readFileSync(baseline, 'utf8')).entries, []);
+
+  const written = run(
+    ['scan', page, ...LEAN_RULES, '--fail-on-lean', '--write-baseline', baseline],
+    {
+      stdio: ['ignore', 'pipe', 'pipe']
+    }
+  );
+  assert.equal(written.status, 0);
+  const entries = JSON.parse(fs.readFileSync(baseline, 'utf8')).entries;
+  assert.deepEqual(entries.map((e) => [e.ruleId, e.lean]).sort(), [
+    ['heading-order', 'fail'],
+    ['invalid-field-error-message', 'fail']
+  ]);
+
+  const known = run(['scan', page, ...LEAN_RULES, '--fail-on-lean', '--baseline', baseline]);
+  assert.equal(known.status, 0);
+  assert.match(known.stdout, /baseline likely failures: 2 known, 0 new, 0 stale/);
+
+  // A second skipped heading is new.
+  const changed = leanPage('lean-baseline', LEAN_PAGE.replace('</main>', '<h5>More</h5></main>'));
+  const fresh = run(['scan', changed, ...LEAN_RULES, '--fail-on-lean', '--baseline', baseline]);
+  assert.equal(fresh.status, 1);
+  assert.match(fresh.stdout, /baseline likely failures: 2 known, 1 new, 0 stale/);
+  assert.match(
+    fresh.stdout,
+    /NEW likely failures \(not in baseline, 1 occurrence\(s\)\):\n {2}- heading-order: /
+  );
+  const json = JSON.parse(
+    run(['scan', changed, ...LEAN_RULES, '--fail-on-lean', '--baseline', baseline, '--json']).stdout
+  );
+  assert.equal(json.baseline.leanFail.newCount, 1);
+  assert.equal(json.baseline.leanFail.knownCount, 2);
+
+  // Only heading-order's new finding is new, and --lean-fail-wcag-only leaves it out.
+  const wcagOnly = run([
+    'scan',
+    changed,
+    ...LEAN_RULES,
+    '--fail-on-lean',
+    '--lean-fail-wcag-only',
+    '--baseline',
+    baseline
+  ]);
+  assert.equal(wcagOnly.status, 0);
+  assert.match(wcagOnly.stdout, /baseline likely failures: 2 known, 0 new/);
+
+  // Without --fail-on-lean, the likely failures don't count and the entries are left out.
+  const without = run(['scan', changed, ...LEAN_RULES, '--baseline', baseline]);
+  assert.equal(without.status, 0);
+  assert.doesNotMatch(without.stdout, /baseline likely failures/);
+});
+
+const OLD_BASELINE = {
+  version: 1,
+  generatedAt: '2026-10-01T00:00:00.000Z',
+  entries: [
+    {
+      ruleId: 'img-alt-present',
+      reasonCode: 'DEFAULT',
+      selector: 'html > body > img',
+      html: '<img src="x.png">'
+    },
+    {
+      ruleId: 'area-alt-present',
+      reasonCode: 'DEFAULT',
+      selector: 'html > body > map > area',
+      html: '<area href="/a" alt="" shape="rect" coords="0,0,10,10">'
+    }
+  ]
+};
+
+test('CLI: --migrate-baseline without a page makes the moves that need no scan', () => {
+  const file = path.join(tmpDir, 'migrate-noscan.json');
+  fs.writeFileSync(file, JSON.stringify(OLD_BASELINE));
+  const r = run(['scan', '--migrate-baseline', file], { stdio: ['ignore', 'pipe', 'pipe'] });
+  assert.equal(r.status, 0);
+  const migrated = JSON.parse(fs.readFileSync(file, 'utf8'));
+  assert.equal(migrated.generatedAt, OLD_BASELINE.generatedAt);
+  assert.deepEqual(
+    migrated.entries.map((e) => e.reasonCode),
+    ['TEXT_ALTERNATIVE_MISSING', 'DEFAULT'],
+    "area-alt-present's code was split, so it needs the finding"
+  );
+});
+
+test("CLI: --migrate-baseline against a scan takes each finding's code, and accepts nothing new", () => {
+  const page = leanPage(
+    'migrate-page',
+    '<!doctype html><html lang="en"><head><title>T</title></head><body><img src="x.png"><img src="m.png" alt="Map" usemap="#m"><map name="m"><area href="/a" alt="" shape="rect" coords="0,0,10,10"></map><img src="z.png"></body></html>'
+  );
+  const file = path.join(tmpDir, 'migrate-scan.json');
+  fs.writeFileSync(file, JSON.stringify(OLD_BASELINE));
+  const rules = ['--rules', 'img-alt-present,area-alt-present'];
+  const r = run(['scan', page, ...rules, '--migrate-baseline', file]);
+  assert.equal(r.status, 0, 'never fails the build');
+  assert.match(r.stdout, /img-alt-present/);
+  const migrated = JSON.parse(fs.readFileSync(file, 'utf8'));
+  assert.deepEqual(
+    migrated.entries.map((e) => e.reasonCode),
+    ['TEXT_ALTERNATIVE_MISSING', 'TEXT_ALTERNATIVE_EMPTY']
+  );
+  // The second image without alt is still new against it.
+  const check = JSON.parse(run(['scan', page, ...rules, '--baseline', file, '--json']).stdout);
+  assert.equal(check.baseline.knownCount, 2);
+  assert.equal(check.baseline.newCount, 1);
+});
+
+test('CLI: --migrate-baseline with --baseline or --write-baseline, or a missing file, exits 2', () => {
+  const page = leanPage('migrate-usage');
+  const file = path.join(tmpDir, 'migrate-usage.json');
+  fs.writeFileSync(file, JSON.stringify(OLD_BASELINE));
+  const both = run(['scan', page, '--migrate-baseline', file, '--baseline', file]);
+  assert.equal(both.status, 2);
+  assert.match(both.stderr, /--baseline and --migrate-baseline cannot be used together/);
+  const write = run(['scan', page, '--migrate-baseline', file, '--write-baseline', file]);
+  assert.equal(write.status, 2);
+  assert.match(write.stderr, /--write-baseline and --migrate-baseline cannot be used together/);
+  const missing = run(['scan', '--migrate-baseline', path.join(tmpDir, 'nope.json')]);
+  assert.equal(missing.status, 2);
+  assert.match(missing.stderr, /Could not read baseline file/);
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), OLD_BASELINE);
+});
+
+test('CLI: --no-hooks without --browser exits 2: a static scan runs no page script', () => {
+  const { status, stderr } = run(['scan', leanPage('no-hooks-static'), '--no-hooks']);
+  assert.equal(status, 2);
+  assert.match(stderr, /--no-hooks needs --browser/);
+});
+
+test('CLI: --migrate-baseline over several pages migrates each entry against its own page', () => {
+  const dir = path.join(tmpDir, 'migrate-pages');
+  fs.mkdirSync(dir);
+  const area = '<area href="/a" alt="" shape="rect" coords="0,0,10,10">';
+  fs.writeFileSync(
+    path.join(dir, 'a.html'),
+    `<!doctype html><html lang="en"><head><title>A</title></head><body><img src="m.png" alt="Map" usemap="#m"><map name="m">${area}</map></body></html>`
+  );
+  fs.writeFileSync(
+    path.join(dir, 'b.html'),
+    '<!doctype html><html lang="en"><head><title>B</title></head><body><img src="b.png" alt="B"></body></html>'
+  );
+  const entry = { ruleId: 'area-alt-present', reasonCode: 'DEFAULT', selector: 'area', html: area };
+  const file = path.join(dir, 'baseline.json');
+  fs.writeFileSync(
+    file,
+    JSON.stringify({
+      version: 1,
+      entries: [
+        { ...entry, page: 'a.html' },
+        { ...entry, page: 'b.html' }
+      ]
+    })
+  );
+  const r = run(
+    ['scan', 'a.html', 'b.html', '--rules', 'area-alt-present', '--migrate-baseline', file],
+    {
+      cwd: dir
+    }
+  );
+  assert.equal(r.status, 0);
+  assert.deepEqual(
+    JSON.parse(fs.readFileSync(file, 'utf8')).entries.map((e) => [e.page, e.reasonCode]),
+    [
+      ['a.html', 'TEXT_ALTERNATIVE_EMPTY'],
+      ['b.html', 'DEFAULT']
+    ]
+  );
 });
