@@ -1,6 +1,6 @@
 {
   "name": "@surea11y/cli",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "Command-line WCAG 2.2 accessibility scanner for static HTML, or rendered pages with Playwright, with several pages per run, baseline and severity gating, and HTML/SARIF/JUnit reports. Powered by @surea11y/core.",
   "keywords": [
     "accessibility",
@@ -57,7 +57,7 @@
     "prepublishOnly": "npm run lint && npm test"
   },
   "dependencies": {
-    "@surea11y/binding-base": "^1.5.0",
+    "@surea11y/binding-base": "^1.6.0",
     "@surea11y/core": "^1.14.0",
     "jsdom": "^29.1.1"
   },
