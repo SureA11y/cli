@@ -53,8 +53,9 @@ function printHelp() {
 
 Usage:
   surea11y scan <file-or-url>... [options]
+  surea11y procedures [requirement] [options]
 
-Options:
+Scan options:
   --urls <file>           Also scan each path or URL listed in <file>, one per line (# starts a comment)
   --sitemap <url-or-file> Also scan the pages a sitemap.xml lists (a sitemap index is followed)
   --max-pages <n>         With --sitemap: scan at most <n> of its pages (default: 50)
@@ -97,9 +98,32 @@ Options:
                           <path>, then <name>-2.<ext>, <name>-3.<ext>...)
   --sarif <path>          Write a SARIF 2.1.0 report to <path> (for GitHub Code Scanning etc.)
   --junit <path>          Write a JUnit XML report to <path> (for GitLab, Azure DevOps, Jenkins, CircleCI)
+  --manual-checks <path>  Write the worksheet of what the scan leaves to a person: the checks no rule decides
+                          in full, for the standard scanned, to record a result and notes per check
+                          (.md for Markdown; several pages: one per page, numbered as --html's)
   --compact               Keep pass/notApplicable results to their rule, outcome and type (a smaller --json)
   -h, --help              Show this help
   -v, --version           Show the installed version
+
+Procedures options (how a person assesses each requirement by hand; needs @surea11y/core ${PROCEDURES_CORE}):
+  [requirement]           One requirement only, such as 1.4.3, or a pack's with --standard
+  --checklist             A worksheet: each check once, with a result and notes to record (default: a reference)
+  --wcag <version>        WCAG 2.0, 2.1 or 2.2 (default: the latest)
+  --wcag-level <level>    Up to level A, AA or AAA (default: every level)
+  --standard <key>        A pack's standard by key or name (with --pack), or best-practice
+  --standard-version <v>  With --standard: its version (default: the latest that has procedures)
+  --profile <name>        A pack's profile: its standard and version (with --pack)
+  --pack <name-or-path>   Load a pack, for its standard and its rules' steps (repeatable)
+  --automation <list>     Only what rules decide in full, in part or not at all: full, partial, manual
+  --tools <list>          Only what needs: keyboard, pointer, screen-reader, zoom, contrast-theme, devtools
+  --rules <ids>           Only what these rules test
+  --locale <locale>       The page's language and the procedures' where translated (default: en)
+  --format <format>       html (default; .md output: markdown) or markdown
+  -o, --output <path>     Write to <path> (default: standard output)
+  --title <text>          The page's title
+  --variants              Also show the steps a scan's question gives under each facet
+  --no-record             A worksheet without results to record
+  --json                  Print the procedures as JSON instead
 
 Exit codes:
   0  scan completed, no "fail" outcomes (or no *new* ones, with --baseline; or none at
@@ -110,7 +134,9 @@ Exit codes:
      a --rules/--tags list naming no rule or tag, or a selection that runs no
      rule, a --context selector that is invalid or matches nothing, a custom
      rule or a pack the engine could not run, a --profile that was not
-     applied, --browser without playwright, etc.)
+     applied, --browser without playwright, etc.); for procedures, a usage
+     error, a standard, version or requirement core has no procedures for,
+     or a core without them
 
 Examples:
   surea11y scan ./index.html
@@ -135,8 +161,14 @@ Examples:
   surea11y scan ./index.html --junit a11y.junit.xml
   surea11y scan ./index.html --custom-rules ./a11y-rules.js
   surea11y scan ./index.html --pack ./acme-policy-pack.js --profile acme-web-2026
+  surea11y scan https://example.com/ --wcag 2.2 --html report.html --manual-checks manual.html
+  surea11y procedures --wcag 2.2 --wcag-level AA --checklist -o audit.html
+  surea11y procedures --wcag-level AA --automation manual,partial -o left-to-a-person.md
+  surea11y procedures 1.4.12 --locale fr -o 1.4.12.html
+  surea11y procedures --pack @surea11y/pack-en301549 --profile en301549-v4.1.1 --checklist -o en-301-549.html
 
-See docs/CLI.md for the full reference (baseline/allowlist, HTML, SARIF and JUnit reports, custom rules, packs):
+See docs/CLI.md for the full reference (baseline/allowlist, HTML, SARIF and JUnit reports, custom rules, packs,
+procedures and manual checks):
 https://github.com/SureA11y/cli/blob/main/docs/CLI.md
 `);
 }
@@ -244,6 +276,40 @@ function parseArgs(argv) {
         break;
       case '--migrate-baseline':
         out.migrateBaseline = argv[++i];
+        break;
+      case '--manual-checks':
+        out.manualChecks = argv[++i];
+        break;
+      case '--checklist':
+        out.checklist = true;
+        break;
+      case '--standard':
+        out.standard = argv[++i];
+        break;
+      case '--standard-version':
+        out.standardVersion = argv[++i];
+        break;
+      case '--automation':
+        out.automation = argv[++i];
+        break;
+      case '--tools':
+        out.tools = argv[++i];
+        break;
+      case '--format':
+        out.format = argv[++i];
+        break;
+      case '-o':
+      case '--output':
+        out.output = argv[++i];
+        break;
+      case '--title':
+        out.title = argv[++i];
+        break;
+      case '--variants':
+        out.variants = true;
+        break;
+      case '--no-record':
+        out.noRecord = true;
         break;
       case '-h':
       case '--help':
@@ -1332,6 +1398,288 @@ function migrateBaselineFile(file, pages) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Procedures: how a person assesses each requirement by hand, from core
+// (its docs/PROCEDURES.md). `surea11y procedures` writes them as a reference
+// or a worksheet, and `scan --manual-checks` writes the worksheet of what a
+// scan leaves to a person. Core 1.15 has them; an older core is named in the
+// error, so the rest of the CLI works with it as before.
+
+const PROCEDURES_CORE = '1.15.0';
+const LEVELS = ['A', 'AA', 'AAA'];
+const AUTOMATION = ['full', 'partial', 'manual'];
+const TOOLS = ['keyboard', 'pointer', 'screen-reader', 'zoom', 'contrast-theme', 'devtools'];
+// What no rule decides in full: what a scan leaves to a person.
+const LEFT_TO_A_PERSON = ['manual', 'partial'];
+
+function proceduresApi(flag) {
+  const core = require('@surea11y/core');
+  const names = ['listProcedures', 'procedureChecklist', 'proceduresFor', 'renderProcedures'];
+  if (names.every((n) => typeof core[n] === 'function')) return core;
+  throw new Error(
+    `${flag} needs @surea11y/core ${PROCEDURES_CORE} or later; this one is ${getCoreVersion() || 'unknown'}`
+  );
+}
+
+// 'AA' asks for A and AA, as --wcag-level does for a scan.
+function levelsUpTo(level) {
+  return LEVELS.slice(0, LEVELS.indexOf(level) + 1);
+}
+
+// The pack whose standard has the profile, and the version it targets.
+function packProfile(packs, profile) {
+  for (const pack of packs || []) {
+    const st = pack.standard;
+    const p = st && st.profiles && profile ? st.profiles[profile] : null;
+    if (p) return { pack, standard: st, version: p.version };
+  }
+  return null;
+}
+
+// What a scan's worksheet covers: a pack's standard and version where the
+// scan ran one of its profiles and the pack gives procedures, otherwise the
+// WCAG version and level the scan targeted (--wcag and --wcag-level, or the
+// profile's), WCAG 2.2 AA by default.
+function scanProcedureScope(args, packs, core) {
+  const fromPack = packProfile(packs, args.profile);
+  if (fromPack && fromPack.standard.procedures) {
+    return { standard: fromPack.standard.key, version: fromPack.version };
+  }
+  const target =
+    args.profile && typeof core.getProfileWcagTarget === 'function'
+      ? core.getProfileWcagTarget(args.profile, { packs })
+      : null;
+  const version = args.wcag || (target && target.version) || '2.2';
+  const level = args.wcagLevel || (target && target.level) || 'AA';
+  return {
+    standard: 'wcag',
+    version,
+    levels: levelsUpTo(level),
+    ...(fromPack ? { note: `the pack "${fromPack.pack.name}" gives no procedures` } : {})
+  };
+}
+
+function htmlText(s) {
+  return s
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&amp;/g, '&');
+}
+
+// Core's title for a checklist, in its locale: a scan's worksheet adds its
+// page to it, since a worksheet keeps its results in the browser under its
+// title, and pages opened from disk share one store.
+function worksheetTitle(core, checklist, locale) {
+  const page = core.renderProcedures(checklist, {
+    format: 'html',
+    fragment: true,
+    ...(locale ? { locale } : {})
+  });
+  const match = /<h1>([^<]*)<\/h1>/.exec(page);
+  return match ? htmlText(match[1]) : 'Manual checks';
+}
+
+// --format, or the output file's extension: .md or .markdown for Markdown.
+function procedureFormat(args) {
+  if (args.format !== undefined) return args.format;
+  return args.output && /\.(md|markdown)$/i.test(args.output) ? 'markdown' : 'html';
+}
+
+// scan --manual-checks: per page, the worksheet of what no rule decides in
+// full, for the standard the scan ran, in its locale.
+function writeManualChecks(args, packs, pages) {
+  const core = proceduresApi('--manual-checks');
+  const scope = scanProcedureScope(args, packs, core);
+  if (scope.note) {
+    process.stderr.write(`Note: --manual-checks lists WCAG ${scope.version}'s: ${scope.note}.\n`);
+  }
+  const checklist = core.procedureChecklist({
+    standard: scope.standard,
+    version: scope.version,
+    ...(scope.levels ? { levels: scope.levels } : {}),
+    automation: LEFT_TO_A_PERSON,
+    packs,
+    ...(args.locale ? { locale: args.locale } : {})
+  });
+  if (!checklist) {
+    throw new Error(
+      `--manual-checks: core has no procedures for ${scope.standard} ${scope.version}`
+    );
+  }
+  const format = /\.(md|markdown)$/i.test(args.manualChecks) ? 'markdown' : 'html';
+  const options = { format, packs, ...(args.locale ? { locale: args.locale } : {}) };
+  const title = worksheetTitle(core, checklist, args.locale);
+  pages.forEach(({ target }, i) => {
+    const file = numberedPath(args.manualChecks, i + 1);
+    fs.writeFileSync(
+      file,
+      core.renderProcedures(checklist, { ...options, title: `${title} — ${target}` })
+    );
+    process.stderr.write(`Wrote manual checks to: ${file}\n`);
+  });
+}
+
+// The options `surea11y procedures` takes, and the flag of each: any other
+// is a scan's, and an error here.
+const PROCEDURES_FLAGS = {
+  locale: '--locale',
+  packs: '--pack',
+  profile: '--profile',
+  wcag: '--wcag',
+  wcagLevel: '--wcag-level',
+  rules: '--rules',
+  json: '--json',
+  standard: '--standard',
+  standardVersion: '--standard-version',
+  automation: '--automation',
+  tools: '--tools',
+  checklist: '--checklist',
+  format: '--format',
+  output: '--output',
+  title: '--title',
+  variants: '--variants',
+  noRecord: '--no-record'
+};
+
+function usage(message) {
+  process.stderr.write(`Error: ${message}. See --help.\n`);
+  process.exitCode = 2;
+}
+
+// surea11y procedures [requirement]: a standard's procedures, or one
+// requirement's, as a reference (default) or a worksheet (--checklist), in
+// HTML or Markdown, to a file (--output) or to stdout; with --json, the data.
+async function runProcedures(args) {
+  for (const key of Object.keys(args)) {
+    if (key === '_' || PROCEDURES_FLAGS[key]) continue;
+    const flag = '--' + key.replace(/[A-Z]/g, (c) => '-' + c.toLowerCase());
+    return usage(`${flag} is an option of scan, not of procedures`);
+  }
+  if (args._.length > 1) return usage('procedures takes at most one requirement');
+  const requirement = args._[0];
+  let core;
+  try {
+    core = proceduresApi('procedures');
+  } catch (err) {
+    process.stderr.write(`Error: ${err.message}\n`);
+    process.exitCode = 2;
+    return;
+  }
+
+  const format = procedureFormat(args);
+  if (!['html', 'markdown'].includes(format)) {
+    return usage(`--format must be "html" or "markdown", not "${format}"`);
+  }
+  if (args.wcagLevel !== undefined) {
+    const level = String(args.wcagLevel).toUpperCase();
+    if (!LEVELS.includes(level)) {
+      return usage(`--wcag-level must be "A", "AA" or "AAA", not "${args.wcagLevel}"`);
+    }
+    args.wcagLevel = level;
+  }
+  const automation = args.automation === undefined ? undefined : splitList(args.automation);
+  const badAutomation = (automation || []).filter((a) => !AUTOMATION.includes(a));
+  if (badAutomation.length) {
+    return usage(`--automation takes ${AUTOMATION.join(', ')}, not "${badAutomation.join(', ')}"`);
+  }
+  const tools = args.tools === undefined ? undefined : splitList(args.tools);
+  const badTools = (tools || []).filter((t) => !TOOLS.includes(t));
+  if (badTools.length)
+    return usage(`--tools takes ${TOOLS.join(', ')}, not "${badTools.join(', ')}"`);
+  if (args.standard && (args.wcag || args.profile)) {
+    return usage('--standard can not be given with --wcag or --profile');
+  }
+  if (requirement && (args.checklist || automation || tools || args.rules || args.wcagLevel)) {
+    return usage('a single requirement takes no --checklist, filter or --wcag-level');
+  }
+
+  let packs;
+  try {
+    packs = (args.packs || []).map(loadPack);
+  } catch (err) {
+    process.stderr.write(`Error: ${formatError(err)}\n`);
+    process.exitCode = 2;
+    return;
+  }
+
+  // Which standard: --standard (a pack's, by key or name, or wcag or
+  // best-practice), a pack's --profile, or WCAG at --wcag and --wcag-level.
+  let options;
+  if (args.standard && !['wcag', 'WCAG'].includes(args.standard)) {
+    options = {
+      standard: args.standard,
+      ...(args.standardVersion ? { version: args.standardVersion } : {})
+    };
+  } else if (args.profile) {
+    const fromPack = packProfile(packs, args.profile);
+    if (!fromPack) {
+      return usage(`--profile "${args.profile}" is no profile of a pack given with --pack`);
+    }
+    if (!fromPack.standard.procedures) {
+      return usage(`the pack "${fromPack.pack.name}" gives no procedures for its standard`);
+    }
+    options = { standard: fromPack.standard.key, version: fromPack.version };
+  } else {
+    if (args.standardVersion)
+      return usage('--standard-version goes with --standard; for WCAG, use --wcag');
+    options = {
+      standard: 'wcag',
+      ...(args.wcag ? { version: args.wcag } : {}),
+      ...(args.wcagLevel ? { levels: levelsUpTo(args.wcagLevel) } : {})
+    };
+  }
+  const read = {
+    ...options,
+    packs,
+    ...(args.locale ? { locale: args.locale } : {}),
+    ...(automation ? { automation } : {}),
+    ...(tools ? { tools } : {}),
+    ...(args.rules ? { rules: splitList(args.rules) } : {})
+  };
+
+  let data;
+  try {
+    data = requirement
+      ? core.proceduresFor(requirement, read)
+      : args.checklist
+        ? core.procedureChecklist(read)
+        : core.listProcedures(read);
+  } catch (err) {
+    process.stderr.write(`Error: ${formatError(err)}\n`);
+    process.exitCode = 2;
+    return;
+  }
+  if (!data) {
+    const what = requirement ? `requirement "${requirement}"` : `standard "${options.standard}"`;
+    const version = options.version ? ` version "${options.version}"` : '';
+    const hint =
+      options.standard === 'wcag' || options.standard === 'best-practice'
+        ? ''
+        : " (a pack's standard needs its pack, with --pack, and a pack that gives procedures)";
+    return usage(`core has no procedures for ${what}${requirement ? '' : version}${hint}`);
+  }
+
+  const text = args.json
+    ? JSON.stringify(data, null, 2) + '\n'
+    : core.renderProcedures(data, {
+        format,
+        packs,
+        ...(args.locale ? { locale: args.locale } : {}),
+        ...(args.title ? { title: args.title } : {}),
+        ...(args.variants ? { variants: true } : {}),
+        ...(args.noRecord ? { record: false } : {})
+      });
+  if (args.output) {
+    fs.writeFileSync(args.output, text);
+    process.stderr.write(`Wrote procedures to: ${args.output}\n`);
+  } else {
+    process.stdout.write(text);
+  }
+  process.exitCode = 0;
+}
+
 async function runScan(args) {
   // --max-pages limits what --sitemap adds: a whole number above 0.
   if (args.maxPages !== undefined) {
@@ -1406,6 +1754,38 @@ async function runScan(args) {
       return;
     }
     args.failOnSeverity = level;
+  }
+
+  // The options of procedures alone: a scan would ignore them.
+  const proceduresOnly = [
+    ['--checklist', args.checklist],
+    ['--standard', args.standard],
+    ['--standard-version', args.standardVersion],
+    ['--automation', args.automation],
+    ['--tools', args.tools],
+    ['--format', args.format],
+    ['--output', args.output],
+    ['--title', args.title],
+    ['--variants', args.variants],
+    ['--no-record', args.noRecord]
+  ].find(([, given]) => given !== undefined);
+  if (proceduresOnly) {
+    process.stderr.write(
+      `Error: ${proceduresOnly[0]} is an option of procedures, not of scan. See --help.\n`
+    );
+    process.exitCode = 2;
+    return;
+  }
+
+  // --manual-checks needs a core with the procedures: said before any scan.
+  if (args.manualChecks) {
+    try {
+      proceduresApi('--manual-checks');
+    } catch (err) {
+      process.stderr.write(`Error: ${err.message}\n`);
+      process.exitCode = 2;
+      return;
+    }
   }
 
   // Options that only a browser can honour: without --browser, a static scan
@@ -1596,6 +1976,16 @@ async function runScan(args) {
     });
   }
 
+  if (args.manualChecks) {
+    try {
+      writeManualChecks(args, packs, pages);
+    } catch (err) {
+      process.stderr.write(`Error: ${formatError(err)}\n`);
+      process.exitCode = 2;
+      return;
+    }
+  }
+
   if (args.sarif) {
     const texts = pages.map(({ result, page }) =>
       renderSarifReport(result, {
@@ -1747,16 +2137,17 @@ async function main() {
   }
 
   const [command, ...rest] = args._;
-  if (command !== 'scan') {
+  if (command !== 'scan' && command !== 'procedures') {
     process.stderr.write(
-      `Error: unknown command "${command}". Only "scan" is supported. See --help.\n`
+      `Error: unknown command "${command}": "scan" or "procedures". See --help.\n`
     );
     process.exitCode = 2;
     return;
   }
 
   args._ = rest;
-  await runScan(args);
+  if (command === 'procedures') await runProcedures(args);
+  else await runScan(args);
 }
 
 main().catch((err) => {

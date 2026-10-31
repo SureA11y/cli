@@ -225,6 +225,13 @@ surea11y scan ./dist/index.html --junit a11y.junit.xml
 # Your own org-specific rules
 surea11y scan ./dist/index.html --custom-rules ./a11y-rules.js
 
+# The checks the scan leaves to a person, as a worksheet next to the report
+surea11y scan https://example.com/ --wcag 2.2 --html report.html --manual-checks manual-checks.html
+
+# How to assess every WCAG 2.2 A and AA criterion by hand, or a worksheet for a manual audit
+surea11y procedures --wcag-level AA -o wcag-22-aa.html
+surea11y procedures --wcag-level AA --checklist --title "Audit: example.com" -o audit.html
+
 # A standard or your organisation's checklist, from a pack, with its profile
 surea11y scan ./dist/index.html --pack ./acme-policy-pack.js --profile acme-web-2026
 ```

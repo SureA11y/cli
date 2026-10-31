@@ -7,6 +7,7 @@ npx @surea11y/cli scan ./index.html
 npx @surea11y/cli scan https://example.com/
 npx @surea11y/cli scan ./index.html ./about.html --urls more-pages.txt
 npx @surea11y/cli scan https://app.example.com/ --browser
+npx @surea11y/cli procedures --wcag-level AA --checklist -o audit.html
 ```
 
 Or install it once:
@@ -59,6 +60,7 @@ With `--browser`, it opens each page in headless Chromium instead, runs its scri
 | `--html <path>` | Write a self-contained, browsable HTML report to `<path>`; for several pages, one each: `<path>`, then `<name>-2.<ext>`, `<name>-3.<ext>`... See [`REPORT.md`](https://github.com/SureA11y/core/blob/main/docs/REPORT.md). |
 | `--sarif <path>` | Write a SARIF 2.1.0 report to `<path>` (e.g. for GitHub Code Scanning). See [`SARIF.md`](https://github.com/SureA11y/core/blob/main/docs/SARIF.md). |
 | `--junit <path>` | Write a JUnit XML report to `<path>` (for the test views of GitLab, Azure DevOps, Jenkins, CircleCI). See [JUnit report](#junit-report) below. |
+| `--manual-checks <path>` | Write the worksheet of what the scan leaves to a person: the checks no rule decides in full, for the standard scanned. See [Manual checks](#manual-checks) below. |
 | `--compact` | Keep each `pass` and `notApplicable` result to its rule, outcome and type: a smaller `--json`, and the same reports. See [Compact results](#compact-results) below. |
 | `-h`, `--help` | Show usage. |
 | `-v`, `--version` | Show the installed version of the CLI. `--help` and the summary also name the `@surea11y/core` release that ran the scan, and `--json` has it as `engine.version`. |
@@ -546,6 +548,73 @@ a11y:
 ```
 
 `when: always` keeps the report when the scan fails the job, which is when you want to read it.
+
+## Manual checks
+
+A scan decides what rules can decide. `--manual-checks <path>` writes, next to it, the rest: a worksheet of the checks no rule decides in full, for a person to do by hand, with the steps for each, what passes and what fails, and a result and notes to record. With [`--html`](#html-report), the team has both halves of the assessment from one run:
+
+```sh
+surea11y scan https://example.com/ --wcag 2.2 --html report.html --manual-checks manual-checks.html
+```
+
+- **What it lists:** the procedures whose facets no rule decides in full (core's `procedureChecklist` with `automation: ['manual', 'partial']`), each once, grouped by WCAG's principles and guidelines, or by a pack's own groups.
+- **For which standard:** the one scanned. A pack's profile (`--pack … --profile en301549-v4.1.1`) gives that standard and version, under its own numbers, where the pack gives procedures. Otherwise it is WCAG, at the version and level of `--wcag` and `--wcag-level`, or of `--profile`'s target, and WCAG 2.2 A and AA by default. A pack that gives no procedures, such as `@surea11y/pack-en301549` 1.1.0, gets WCAG's, with a note on stderr.
+- **In which language:** `--locale`'s, where core has it.
+- **Several pages:** one worksheet per page, numbered as `--html`'s are (`manual-checks.html`, `manual-checks-2.html`…), each titled with its page. A worksheet keeps its results in the browser under its title, so each page's results stay apart.
+- **The worksheet:** open it from disk, record each result (passes, fails, does not apply, not checked) and notes, and download them as JSON, with each requirement's result rolled up from its checks, or as CSV. Results are kept in the browser until cleared. A path ending in `.md` writes Markdown instead, with a task item per check.
+
+It never changes the exit code. It needs `@surea11y/core` 1.15 or later, which has the procedures; with an older core, the run stops before scanning (exit `2`) and says so. See core's [`PROCEDURES.md`](https://github.com/SureA11y/core/blob/main/docs/PROCEDURES.md#rendering-them) for the worksheet in full.
+
+## Procedures: how to assess by hand
+
+`surea11y procedures` writes how a person assesses each requirement of a standard by hand, with no scan: a reference to read, or a worksheet to work through (`--checklist`). It needs `@surea11y/core` 1.15 or later.
+
+```sh
+# How to assess every WCAG 2.2 A and AA criterion, as a page
+surea11y procedures --wcag 2.2 --wcag-level AA -o wcag-22-aa.html
+
+# A worksheet for a manual audit, titled for it
+surea11y procedures --wcag-level AA --checklist --title "Audit: example.com" -o audit.html
+
+# Only what no rule decides in full, as Markdown for a repository
+surea11y procedures --wcag-level AA --automation manual,partial -o left-to-a-person.md
+
+# What needs a screen reader, for a session with a person who uses one
+surea11y procedures --wcag-level AA --tools screen-reader -o screen-reader-session.html
+
+# One criterion, in French, with the steps a scan's questions give
+surea11y procedures 1.4.12 --locale fr --variants -o 1.4.12.html
+
+# A pack's standard, under its own numbers: by its profile, or by key and version
+surea11y procedures --pack @surea11y/pack-en301549 --profile en301549-v4.1.1 --checklist -o en-301-549.html
+surea11y procedures --pack @surea11y/pack-en301549 --standard en301549 --standard-version V3.2.1 -o en-v3.html
+
+# The data, for a tool of your own
+surea11y procedures --wcag-level A --checklist --json > checklist.json
+```
+
+| Flag | Meaning |
+|---|---|
+| `[requirement]` | One requirement only: a WCAG criterion (`1.4.3`), `best-practice`, or a pack's requirement with `--standard`. |
+| `--checklist` | A worksheet: each procedure once, with a result and notes to record. Without it, a reference: every requirement and each of its facets. |
+| `--wcag <version>` | WCAG `2.0`, `2.1` or `2.2` (the default). |
+| `--wcag-level <level>` | Up to level `A`, `AA` or `AAA`; every level by default. |
+| `--standard <key>` | A pack's standard, by key (`en301549`) or name (`"EN 301 549"`), with `--pack`; or `best-practice`. Not with `--wcag` or `--profile`. |
+| `--standard-version <version>` | With `--standard`: its version; by default the latest that has procedures. |
+| `--profile <name>` | A pack's profile, for its standard and version, with `--pack`. |
+| `--pack <name-or-path>` | A pack, for its standard and its rules' steps. Repeatable. See [Packs](#packs). |
+| `--automation <list>` | Only facets that rules decide in full, in part or not at all: `full`, `partial`, `manual`, comma-separated. |
+| `--tools <list>` | Only procedures that need one of `keyboard`, `pointer`, `screen-reader`, `zoom`, `contrast-theme`, `devtools`. |
+| `--rules <ids>` | Only what these rules test. |
+| `--locale <locale>` | The page's language, and the procedures' where they are translated; English otherwise, marked as such on the page. |
+| `--format <format>` | `html` (the default) or `markdown`; an output path ending in `.md` or `.markdown` gives Markdown. |
+| `-o`, `--output <path>` | Write to `<path>`; standard output otherwise. |
+| `--title <text>` | The page's title and heading. |
+| `--variants` | Also show, under each facet of a reference, the steps a scan's question gives for it. |
+| `--no-record` | A worksheet with no results to record. |
+| `--json` | The procedures as JSON (what core's `listProcedures`, `procedureChecklist` or `proceduresFor` gives) instead of a page. |
+
+The page opens from disk, with nothing loaded from elsewhere, and is itself accessible: core holds it to its own rules. A scan's options (`--browser`, `--html` and the others) are a usage error here, as `procedures`' own are on `scan`. It exits `0` when it wrote the procedures, and `2` for a usage error, a standard, version or requirement core has no procedures for (a pack's standard needs its pack, and a pack that gives procedures), or a core without them.
 
 ## Compact results
 
