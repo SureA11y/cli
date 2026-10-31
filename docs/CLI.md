@@ -515,6 +515,8 @@ surea11y scan ./dist/index.html --html report.html
 
 Open `report.html` directly from disk; no server, no external assets. The findings that need review are grouped as likely fails, likely passes and those that need a person, each with the steps to check it. Works alongside any other output mode. See [`REPORT.md`](https://github.com/SureA11y/core/blob/main/docs/REPORT.md).
 
+With `@surea11y/core` 1.15 or later, the report also has a "What's left for a person" section: for the standard scanned, each requirement with a check no rule decides in full, its outcome in the scan beside it, and those checks with their steps, in `--locale`'s language. A pack's profile (`--pack … --profile …`) gives that pack's standard, under its own numbers, where the pack gives procedures. To record a result and notes for each check, write them as a worksheet as well, with [`--manual-checks`](#manual-checks).
+
 ## SARIF report
 
 For GitHub Code Scanning or another SARIF-consuming dashboard:
