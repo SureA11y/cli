@@ -2,6 +2,16 @@
 
 All notable changes to this package are documented here. This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+Needs `@surea11y/core` 1.15.0 for what is below; with an older core, both say so and exit `2`, and everything else works as before.
+
+### Added
+
+- `--manual-checks <path>` writes, next to a scan, the worksheet of what it leaves to a person: the checks no rule decides in full, each once, for the standard scanned (a pack's, under its own numbers, where its profile ran and it gives procedures; otherwise WCAG at the scan's version and level, 2.2 A and AA by default), in `--locale`'s language. A person records a result and notes per check, kept in the browser and downloaded as JSON, with each requirement's result rolled up, or as CSV. One worksheet per page, numbered as `--html`'s, each titled with its page; a path ending in `.md` writes Markdown. It never changes the exit code. See [`docs/CLI.md`](./docs/CLI.md#manual-checks).
+- `surea11y procedures [requirement]` writes how a person assesses each requirement of a standard by hand, with no scan: a reference, or a worksheet with `--checklist`, in HTML or Markdown (`--format`, or an `.md` output), to a file (`-o`) or to standard output, or as JSON (`--json`). WCAG at `--wcag` and `--wcag-level`, a pack's standard by `--standard` and `--standard-version` or by its `--profile`, or one requirement; `--automation`, `--tools` and `--rules` filter it, and `--locale`, `--title`, `--variants` and `--no-record` shape it. See [`docs/CLI.md`](./docs/CLI.md#procedures-how-to-assess-by-hand).
+- A scan's options on `procedures`, and `procedures`' own on `scan`, are usage errors (exit `2`), as is a standard, version or requirement core has no procedures for.
+
 ## 1.4.0
 
 Requires `@surea11y/core` 1.14.0 and `@surea11y/binding-base` 1.6.0.
