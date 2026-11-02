@@ -1597,6 +1597,9 @@ async function runProcedures(args) {
     return usage(`${flag} is an option of scan, not of procedures`);
   }
   if (args._.length > 1) return usage('procedures takes at most one requirement');
+  if (args.profiles && args.profiles.length > 1) {
+    return usage('procedures take one --profile: a standard and version to read');
+  }
   const requirement = args._[0];
   let core;
   try {
@@ -1629,9 +1632,6 @@ async function runProcedures(args) {
     return usage(`--tools takes ${TOOLS.join(', ')}, not "${badTools.join(', ')}"`);
   if (args.standard && (args.wcag || args.profile)) {
     return usage('--standard can not be given with --wcag or --profile');
-  }
-  if (args.profiles && args.profiles.length > 1) {
-    return usage('procedures take one --profile: a standard and version to read');
   }
   if (requirement && (args.checklist || automation || tools || args.rules || args.wcagLevel)) {
     return usage('a single requirement takes no --checklist, filter or --wcag-level');
