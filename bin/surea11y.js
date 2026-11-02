@@ -208,12 +208,21 @@ function parseArgs(argv) {
       case '--pack':
         (out.packs = out.packs || []).push(argv[++i]);
         break;
-      case '--profile':
+      case '--profile': {
         // Repeatable: a scan of several profiles at once. `profile` stays
-        // the first, for what reads one.
-        (out.profiles = out.profiles || []).push(argv[++i]);
+        // the first, for what reads one. Core matches names without case,
+        // so one given twice, in any case, is one.
+        const name = argv[++i];
+        if (typeof name !== 'string' || !name.trim() || name.startsWith('--')) {
+          throw new Error('--profile needs a profile name after it, such as --profile wcag22-aa.');
+        }
+        out.profiles = out.profiles || [];
+        if (!out.profiles.some((p) => p.toLowerCase() === name.trim().toLowerCase())) {
+          out.profiles.push(name.trim());
+        }
         if (out.profile === undefined) out.profile = out.profiles[0];
         break;
+      }
       case '--wcag':
         out.wcag = argv[++i];
         break;
@@ -552,6 +561,11 @@ function findScanProblem(result, args) {
       };
       const lines = notRun.map((p) => `  - "${p.profile}": ${why[p.reason] || p.reason}`);
       const message = `${notRun.length} of ${args.profiles.length} --profile did not run:\n${lines.join('\n')}\nNothing was scanned against ${notRun.length === 1 ? 'it' : 'them'}.`;
+      // None ran: what was scanned is no profile's, and gating it would
+      // judge the page by rules no one chose. --allow-profiles-not-run lets
+      // some not run, not all.
+      if (!ran.length)
+        return `${message} None of the --profile ran, so the scan checked against none of them.`;
       if (args.allowProfilesNotRun) {
         process.stderr.write(`Warning: ${message}\n`);
         return null;
