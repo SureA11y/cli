@@ -1695,3 +1695,121 @@ test('CLI: --migrate-baseline over several pages migrates each entry against its
     ]
   );
 });
+
+// Several --profile: a scan of several profiles at once (core 1.15). Skipped
+// with a core that scans one at a time, which the test after says so of.
+const PROFILE_LISTS = (() => {
+  // Ask the engine itself: a scan of two profiles names them in
+  // engine.profiles only where core takes a list.
+  try {
+    const core = require('@surea11y/core');
+    const { JSDOM } = require('jsdom');
+    const dom = new JSDOM(
+      '<!doctype html><html lang="en"><head><title>t</title></head><body><p>x</p></body></html>',
+      {
+        url: 'https://example.com/',
+        pretendToBeVisual: true,
+        runScripts: 'outside-only'
+      }
+    );
+    const warn = console.warn;
+    console.warn = () => {};
+    let r;
+    try {
+      r = core.runa11yCoreInPage
+        ? dom.window.eval('(' + core.runa11yCoreInPage.toString() + ')')(
+            'https://example.com/',
+            null,
+            { profile: ['wcag22-aa', 'section508'] },
+            null
+          )
+        : null;
+    } finally {
+      console.warn = warn;
+      dom.window.close();
+    }
+    return r && r.engine && Array.isArray(r.engine.profiles)
+      ? false
+      : 'needs @surea11y/core 1.15 (several profiles)';
+  } catch {
+    return 'needs @surea11y/core 1.15 (several profiles)';
+  }
+})();
+
+test(
+  'CLI: several --profile judge the page by each, and the summary names them',
+  { skip: PROFILE_LISTS },
+  () => {
+    const { page, pack } = packFiles('profiles-several');
+    const json = JSON.parse(
+      run(['scan', page, '--pack', pack, '--profile', 'wcag22-aa', '--profile', 'acme-1', '--json'])
+        .stdout
+    );
+    assert.deepEqual(json.engine.profiles, ['wcag22-aa', 'acme-1']);
+    assert.equal(json.engine.profile, 'wcag22-aa');
+    assert.equal(json.rulesResults.find((r) => r.ruleId === 'acme-images').outcome, 'fail');
+    const { stdout } = run([
+      'scan',
+      page,
+      '--pack',
+      pack,
+      '--profile',
+      'wcag22-aa',
+      '--profile',
+      'acme-1'
+    ]);
+    assert.match(stdout, /profiles: wcag22-aa, acme-1/);
+  }
+);
+
+test(
+  'CLI: a --profile of several that did not run is a usage error, unless allowed',
+  { skip: PROFILE_LISTS },
+  () => {
+    const { page } = packFiles('profiles-missing');
+    const failed = run(['scan', page, '--profile', 'wcag22-aa', '--profile', 'acme-1']);
+    assert.equal(failed.status, 2);
+    assert.match(
+      failed.stderr,
+      /1 of 2 --profile did not run:\n {2}- "acme-1": no such profile in core \(a pack's profile needs --pack\)/
+    );
+    const allowed = run([
+      'scan',
+      page,
+      '--profile',
+      'wcag22-aa',
+      '--profile',
+      'acme-1',
+      '--allow-profiles-not-run'
+    ]);
+    assert.notEqual(allowed.status, 2);
+    assert.match(allowed.stderr, /Warning: 1 of 2 --profile did not run/);
+    assert.match(allowed.stdout, /profiles: wcag22-aa/);
+  }
+);
+
+test(
+  'CLI: several --profile with a core that scans one at a time is a usage error',
+  { skip: !PROFILE_LISTS },
+  () => {
+    const { page, pack } = packFiles('profiles-old-core');
+    const { stderr, status } = run([
+      'scan',
+      page,
+      '--pack',
+      pack,
+      '--profile',
+      'wcag22-aa',
+      '--profile',
+      'acme-1'
+    ]);
+    assert.equal(status, 2);
+    assert.match(stderr, /this @surea11y\/core scans one profile at a time/);
+  }
+);
+
+test('CLI: procedures take one --profile', () => {
+  const { stderr, status } = run(['procedures', '--profile', 'wcag22-aa', '--profile', 'acme-1']);
+  assert.equal(status, 2);
+  assert.match(stderr, /procedures take one --profile/);
+});

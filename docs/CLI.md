@@ -53,7 +53,8 @@ With `--browser`, it opens each page in headless Chromium instead, runs its scri
 | `--context <selector>` | Scope the scan to one CSS-selected subtree. A selector that matches no element, or that isn't valid CSS, exits `2`: nothing would be scanned. |
 | `--custom-rules <path>` | Load runtime custom rules from a local JS file. Repeatable. See [Custom rules](#custom-rules) below. |
 | `--pack <name-or-path>` | Load a pack: rules, a standard or a checklist, and their profiles, from a package installed in the project or a local file. Repeatable. See [Packs](#packs) below. |
-| `--profile <name>` | Run a conformance profile, such as `en301549-v4.1.1` or a pack's own. A profile that isn't applied exits `2`. See [`ENGINE_OPTIONS.md`](https://github.com/SureA11y/core/blob/main/docs/ENGINE_OPTIONS.md#conformance-profiles). |
+| `--profile <name>` | Run a conformance profile, such as `en301549-v4.1.1` or a pack's own. A profile that isn't applied exits `2`. Repeat it to judge the page by several at once (`@surea11y/core` 1.15): see [Several profiles](#several-profiles). See [`ENGINE_OPTIONS.md`](https://github.com/SureA11y/core/blob/main/docs/ENGINE_OPTIONS.md#conformance-profiles). |
+| `--allow-profiles-not-run` | With several `--profile`, a profile that didn't run is a warning on stderr instead of exit `2`. |
 | `--write-baseline <path>` | Write every current `fail` occurrence to `<path>`, and with `--fail-on-lean` every likely failure too; never fails the build. See [`BASELINE.md`](https://github.com/SureA11y/core/blob/main/docs/BASELINE.md). |
 | `--baseline <path>` | Gate only on occurrences not already recorded in `<path>` (with `--fail-on-lean`, likely failures too). See [`BASELINE.md`](https://github.com/SureA11y/core/blob/main/docs/BASELINE.md). |
 | `--migrate-baseline <path>` | Rewrite the baseline at `<path>` under the reason codes core gives now, against the pages given, or, with none, only the moves that need no scan; never fails the build and accepts nothing new. See [Upgrading a baseline](#upgrading-a-baseline) below. |
@@ -337,6 +338,17 @@ surea11y scan --migrate-baseline baseline.json                     # without one
 
 It rewrites the file in place with core's `migrateBaselineEntries`, keeping every other entry, field and the rest of the file as they were, and says on stderr how many entries changed. Given the pages, it scans them first, and an entry whose code was split in two takes the code its finding has now: an entry that names a page is migrated against that page's scan, and one that names none against the only page scanned. Without pages, it makes only the moves it can tell without the finding, a code the rule no longer gives that moved to a single new one. Like `--write-baseline`, it never fails the build: the summary or `--json` is printed for the pages scanned, and the run exits `0`. It can't be given with `--baseline` or `--write-baseline`. Commit the rewritten file, and look at its diff.
 
+
+## Several profiles
+
+`--profile` can be given more than once, to judge each page by several profiles at once, a pack's beside WCAG's or another pack's (`@surea11y/core` 1.15 or later):
+
+```bash
+surea11y scan ./dist/index.html --pack @surea11y/pack-wai-aria --profile wcag22-aa --profile wai-aria-1.2
+```
+
+Each profile judges the page as it would alone, and the result reads as one profile with the rules of all: a rule's outcome is the worst its profiles give it, so a failure under any profile exits `1`, and each finding's `verdicts` in `--json` say what each profile makes of it (core's [`OUTPUT_SCHEMA.md`](https://github.com/SureA11y/core/blob/main/docs/OUTPUT_SCHEMA.md#several-profiles)). The summary lists them (`profiles: wcag22-aa, wai-aria-1.2`), `--html` names each and shows each one's verdict on a finding, and `--sarif` and `--junit` gate on the worst outcome, as for one profile. A profile that didn't run exits `2`, listed with why (no such profile, its pack skipped, or `--rules`, `--tags` or `--wcag` chose the rules in its place); `--allow-profiles-not-run` makes it a warning. `--manual-checks` and the HTML report's "What's left for a person" follow the first `--profile`, and `procedures` takes one.
+
 ## Packs
 
 A pack brings rules, variants of core's rules, a standard or an organisation's checklist, and their profiles and messages, from a package of its own: a national standard such as RGAA, or your organisation's accessibility policy (see [`PACKS.md`](https://github.com/SureA11y/core/blob/main/docs/PACKS.md), and [Packs in `ENGINE_OPTIONS.md`](https://github.com/SureA11y/core/blob/main/docs/ENGINE_OPTIONS.md#packs--rules-and-standards-from-outside-core) for the reference). `--pack` loads one by package name, resolved from the working directory's project, or by path; `--profile` runs one of its profiles:
@@ -461,7 +473,7 @@ The summary names the profile and the packs that ran, and `--json` has them as `
 
 - a pack that can't be found (a package name not installed in the project, or a path with no file) or can't be loaded;
 - a pack the engine skips, listed with its reason (the engine's `skippedPacks`): its `core` range leaves out the installed core, it isn't a valid pack, or it doesn't fit with core (a rule id outside its namespace, a variant of a rule core doesn't have);
-- a `--profile` that wasn't applied: no such profile (a pack's profile needs its `--pack`), or `--rules`, `--tags` or `--wcag` chose the rules in its place.
+- a `--profile` that wasn't applied: no such profile (a pack's profile needs its `--pack`), or `--rules`, `--tags` or `--wcag` chose the rules in its place. With several `--profile`, each that didn't run is listed with why, and `--allow-profiles-not-run` makes it a warning.
 
 ## Custom rules
 

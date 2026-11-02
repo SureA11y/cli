@@ -87,7 +87,10 @@ Scan options:
   --context <selector>    CSS selector to scope the scan to a subtree
   --custom-rules <path>   Load runtime custom rules from a JS file (repeatable)
   --pack <name-or-path>   Load a pack (rules, a standard, its profiles), by package name or file (repeatable)
-  --profile <name>        Run a conformance profile (e.g. en301549-v4.1.1, or a pack's own)
+  --profile <name>        Run a conformance profile (e.g. en301549-v4.1.1, or a pack's own);
+                          repeat it to judge the page by several at once (core 1.15)
+  --allow-profiles-not-run  With several --profile, warn about one that did not run
+                          instead of failing
   --write-baseline <path> Write every current "fail" occurrence to <path> (with --fail-on-lean, every
                           likely failure too); never fails the build
   --baseline <path>       Gate only on occurrences not already recorded in <path>
@@ -206,7 +209,10 @@ function parseArgs(argv) {
         (out.packs = out.packs || []).push(argv[++i]);
         break;
       case '--profile':
-        out.profile = argv[++i];
+        // Repeatable: a scan of several profiles at once. `profile` stays
+        // the first, for what reads one.
+        (out.profiles = out.profiles || []).push(argv[++i]);
+        if (out.profile === undefined) out.profile = out.profiles[0];
         break;
       case '--wcag':
         out.wcag = argv[++i];
@@ -219,6 +225,9 @@ function parseArgs(argv) {
         break;
       case '--compact':
         out.compact = true;
+        break;
+      case '--allow-profiles-not-run':
+        out.allowProfilesNotRun = true;
         break;
       case '--baseline':
         out.baseline = argv[++i];
@@ -363,7 +372,9 @@ async function loadHtml(target) {
 
 function buildEngineOptions(args, customRules, packs) {
   const engineOptions = {};
-  if (args.profile) engineOptions.profile = args.profile;
+  // Several --profile: a scan of several profiles at once (core 1.15).
+  if (args.profiles && args.profiles.length > 1) engineOptions.profile = args.profiles.slice();
+  else if (args.profile) engineOptions.profile = args.profile;
   if (packs && packs.length) engineOptions.packs = packs;
   if (args.locale) engineOptions.locale = args.locale;
   if (args.compact) engineOptions.output = { detail: 'findings' };
@@ -524,6 +535,30 @@ function findScanProblem(result, args) {
       (s) => `  - ${s.name ? `"${s.name}"` : '(no name)'}: ${s.reason}`
     );
     return `${skippedPacks.length} pack(s) from --pack did not run:\n${lines.join('\n')}\nSee docs/CLI.md#packs.`;
+  }
+
+  // A scan of several profiles: those it was asked for and didn't run.
+  if (args.profiles && args.profiles.length > 1) {
+    const notRun = (result && result.engine && result.engine.profilesNotRun) || [];
+    const ran = (result && result.engine && result.engine.profiles) || null;
+    if (!ran) {
+      return `${args.profiles.length} --profile given, but this @surea11y/core scans one profile at a time (several need 1.15 or later). Nothing was scanned against them.`;
+    }
+    if (notRun.length) {
+      const why = {
+        'unknown-profile': `no such profile${args.packs && args.packs.length ? ' in core or the packs given' : " in core (a pack's profile needs --pack)"}`,
+        'pack-skipped': 'its pack did not run',
+        'overridden-by-selection': '--rules, --tags or --wcag chose the rules in its place'
+      };
+      const lines = notRun.map((p) => `  - "${p.profile}": ${why[p.reason] || p.reason}`);
+      const message = `${notRun.length} of ${args.profiles.length} --profile did not run:\n${lines.join('\n')}\nNothing was scanned against ${notRun.length === 1 ? 'it' : 'them'}.`;
+      if (args.allowProfilesNotRun) {
+        process.stderr.write(`Warning: ${message}\n`);
+        return null;
+      }
+      return message;
+    }
+    return null;
   }
 
   const appliedProfile = result && result.engine && result.engine.profile;
@@ -712,7 +747,9 @@ function printSummary(
     ].filter(Boolean);
     process.stdout.write(`  hooks: ${hooks.join(', ')}\n`);
   }
-  if (result.engine && result.engine.profile) {
+  if (result.engine && Array.isArray(result.engine.profiles) && result.engine.profiles.length) {
+    process.stdout.write(`  profiles: ${result.engine.profiles.join(', ')}\n`);
+  } else if (result.engine && result.engine.profile) {
     process.stdout.write(`  profile: ${result.engine.profile}\n`);
   }
   if (result.engine && Array.isArray(result.engine.packs) && result.engine.packs.length) {
@@ -1527,6 +1564,8 @@ const PROCEDURES_FLAGS = {
   locale: '--locale',
   packs: '--pack',
   profile: '--profile',
+  // Every --profile given, to say procedures take one.
+  profiles: '--profile',
   wcag: '--wcag',
   wcagLevel: '--wcag-level',
   rules: '--rules',
@@ -1590,6 +1629,9 @@ async function runProcedures(args) {
     return usage(`--tools takes ${TOOLS.join(', ')}, not "${badTools.join(', ')}"`);
   if (args.standard && (args.wcag || args.profile)) {
     return usage('--standard can not be given with --wcag or --profile');
+  }
+  if (args.profiles && args.profiles.length > 1) {
+    return usage('procedures take one --profile: a standard and version to read');
   }
   if (requirement && (args.checklist || automation || tools || args.rules || args.wcagLevel)) {
     return usage('a single requirement takes no --checklist, filter or --wcag-level');
