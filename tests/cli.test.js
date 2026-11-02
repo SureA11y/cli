@@ -1789,6 +1789,35 @@ test(
 );
 
 test(
+  'CLI: --allow-profiles-not-run does not let a scan stand when none of its profiles ran',
+  { skip: PROFILE_LISTS },
+  () => {
+    const { page } = packFiles('profiles-none');
+    const { stderr, status } = run([
+      'scan',
+      page,
+      '--profile',
+      'nope-1.0',
+      '--profile',
+      'nope-2.0',
+      '--allow-profiles-not-run'
+    ]);
+    assert.equal(status, 2);
+    assert.match(stderr, /None of the --profile ran/);
+  }
+);
+
+test('CLI: a --profile given twice, in any case, is one; one with no name is a usage error', () => {
+  const { page } = packFiles('profile-twice');
+  const twice = run(['scan', page, '--profile', 'wcag22-aa', '--profile', 'WCAG22-AA', '--json']);
+  assert.notEqual(twice.status, 2, twice.stderr);
+  assert.equal(JSON.parse(twice.stdout).engine.profile, 'wcag22-aa');
+  const empty = run(['scan', page, '--profile']);
+  assert.equal(empty.status, 2);
+  assert.match(empty.stderr, /--profile needs a profile name after it/);
+});
+
+test(
   'CLI: several --profile with a core that scans one at a time is a usage error',
   { skip: !PROFILE_LISTS },
   () => {
