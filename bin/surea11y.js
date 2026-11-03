@@ -1327,22 +1327,49 @@ async function createBrowserScanner(engineOptions, runOnly, args, customRules, p
 }
 
 // SARIF for several pages: one run, the results of every page (each already
-// names its page as its artifact), with the rules they use. GitHub code
-// scanning refuses a file with several runs of one tool.
-function mergeSarif(texts) {
+// names its page as its artifact), with the rules they use, and every page's
+// notifications (a rule that did not complete, a profile not run), each
+// naming its page. GitHub code scanning refuses a file with several runs of
+// one tool.
+function mergeSarif(texts, pages) {
   const logs = texts.map((t) => JSON.parse(t));
   const merged = logs[0];
   const run = merged.runs[0];
   const ruleIds = new Set((run.tool.driver.rules || []).map((r) => r.id));
-  for (const log of logs.slice(1)) {
+  const notifications = [];
+  let successful = true;
+  let invoked = false;
+  logs.forEach((log, i) => {
     const other = log.runs[0];
-    for (const rule of other.tool.driver.rules || []) {
-      if (!ruleIds.has(rule.id)) {
-        ruleIds.add(rule.id);
-        (run.tool.driver.rules = run.tool.driver.rules || []).push(rule);
+    if (i > 0) {
+      for (const rule of other.tool.driver.rules || []) {
+        if (!ruleIds.has(rule.id)) {
+          ruleIds.add(rule.id);
+          (run.tool.driver.rules = run.tool.driver.rules || []).push(rule);
+        }
+      }
+      run.results = run.results.concat(other.results || []);
+    }
+    for (const invocation of other.invocations || []) {
+      invoked = true;
+      if (invocation.executionSuccessful === false) successful = false;
+      for (const n of invocation.toolExecutionNotifications || []) {
+        notifications.push(
+          n.locations || !pages
+            ? n
+            : { ...n, locations: [{ physicalLocation: { artifactLocation: { uri: pages[i] } } }] }
+        );
       }
     }
-    run.results = run.results.concat(other.results || []);
+  });
+  if (invoked) {
+    run.invocations = [
+      {
+        ...((run.invocations && run.invocations[0]) || {}),
+        executionSuccessful: successful,
+        ...(notifications.length ? { toolExecutionNotifications: notifications } : {})
+      }
+    ];
   }
   return JSON.stringify(merged, null, 2) + '\n';
 }
@@ -2101,7 +2128,15 @@ async function runScan(args) {
           : {})
       })
     );
-    fs.writeFileSync(args.sarif, several ? mergeSarif(texts) : texts[0]);
+    fs.writeFileSync(
+      args.sarif,
+      several
+        ? mergeSarif(
+            texts,
+            pages.map((p) => p.page)
+          )
+        : texts[0]
+    );
     process.stderr.write(`Wrote SARIF report to: ${args.sarif}\n`);
   }
 
