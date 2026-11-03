@@ -177,6 +177,35 @@ test('several pages: --sarif writes one run holding every page', () => {
   assert.ok(rules.includes('aria-allowed-attr'), 'a rule only the second page failed is listed');
 });
 
+test("several pages: --sarif keeps every page's notifications, each naming its page", () => {
+  page('n1.html', '');
+  fs.writeFileSync(
+    path.join(dir, 'n2.html'),
+    '<!doctype html><html lang="en"><head><title>n2</title></head><body><main><h1>n2</h1></main></body></html>'
+  );
+  fs.writeFileSync(
+    path.join(dir, 'throws.js'),
+    `module.exports = [{
+      id: 'acme-throws-on-n2',
+      meta: { title: 'Throws on n2', tags: ['wcag2a', 'wcag111'] },
+      runInPage() {
+        if (document.title === 'n2') throw new Error('boom on n2');
+        return { outcome: 'pass', occurrences: [] };
+      }
+    }];`
+  );
+  run(['scan', 'n1.html', 'n2.html', '--custom-rules', 'throws.js', '--sarif', 'n.sarif']);
+  const log = JSON.parse(fs.readFileSync(path.join(dir, 'n.sarif'), 'utf8'));
+  const notes = log.runs[0].invocations[0].toolExecutionNotifications.filter((n) =>
+    /acme-throws-on-n2 did not complete/.test(n.message.text)
+  );
+  assert.equal(notes.length, 1);
+  assert.equal(
+    path.basename(notes[0].locations[0].physicalLocation.artifactLocation.uri),
+    'n2.html'
+  );
+});
+
 test('several pages: --junit writes one file, suites named after their page', () => {
   page('u1.html', SERIOUS);
   page('u2.html', '<img src="x.png" alt="Logo">');

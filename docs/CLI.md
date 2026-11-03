@@ -223,7 +223,7 @@ https://staging.example.com/account   # behind the build, scanned live
 
 - The summary has a section per page, then a line such as `3 pages scanned: 1 with failures.` The run fails when any page does.
 - `--json` prints an array, one result per page, in the order given.
-- `--sarif` writes one file with one run holding every page's findings; each finding names its page as its location, as with one page. (GitHub code scanning refuses a file with several runs of one tool.)
+- `--sarif` writes one file with one run holding every page's findings; each finding names its page as its location, as with one page, and so does each notification (a rule that did not complete, a profile not run). (GitHub code scanning refuses a file with several runs of one tool.)
 - `--junit` writes one file. Each page's suites are named after the page (`dist/about.html — WCAG 1.1.1`), and its test cases' class names too (`dist/about.html/wcag-1.1.1`), so a CI's test history keeps pages apart.
 - `--html` writes one report per page: `report.html`, `report-2.html`, ...
 - `--write-baseline` records each entry with its page: a URL as given, a file by its path relative to the working directory, so the baseline matches in another checkout. `--baseline` then matches each page against its own entries, so a known failure on one page doesn't hide the same one on another. An entry with no page, from a baseline written for one page, applies to whatever page is scanned.
