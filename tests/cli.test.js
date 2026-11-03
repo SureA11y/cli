@@ -1814,6 +1814,12 @@ test(
   }
 );
 
+test('CLI: --allow-profiles-not-run with one --profile says it changes nothing', () => {
+  const file = writeSimplePage('allow-one-profile.html');
+  const { stderr } = run(['scan', file, '--profile', 'wcag22-aa', '--allow-profiles-not-run']);
+  assert.match(stderr, /Warning: --allow-profiles-not-run goes with several --profile/);
+});
+
 test(
   'CLI: --allow-profiles-not-run does not let a scan stand when none of its profiles ran',
   { skip: PROFILE_LISTS },

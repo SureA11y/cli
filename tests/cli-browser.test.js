@@ -350,6 +350,12 @@ test(
       /browser: 2 scans, merged\n {4}width 1280: 1280×720, light color scheme\n {4}width 320: 320×720, light color scheme\n/
     );
     assert.match(summary.stdout, /seen in: width 320\n/);
+    // Conditions whose labels have commas are told apart.
+    const both = await run(
+      ['scan', 'themed-all.html', ...flags, '--color-scheme', 'light,dark'],
+      dir
+    );
+    assert.match(both.stdout, /seen in: dark, width 1280; dark, width 320\n/);
   }
 );
 

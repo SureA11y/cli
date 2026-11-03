@@ -213,6 +213,10 @@ test('procedures: what it can’t give is a usage error', { skip }, () => {
     ],
     [['procedures', '--standard-version', 'V1'], /--standard-version goes with --standard/],
     [
+      ['procedures', '--standard', 'wcag', '--standard-version', '2.1'],
+      /--standard wcag takes its version from --wcag, not --standard-version/
+    ],
+    [
       ['procedures', '--pack', file('city.js'), '--profile', 'city-1.0', '--wcag', '2.0'],
       /--wcag can not be given with --profile/
     ],
