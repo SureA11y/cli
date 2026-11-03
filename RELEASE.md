@@ -36,13 +36,17 @@ The release workflow enforces this — it resolves both declared ranges against 
 
 ## Checklist
 
-1. **Publish the engine.** `@surea11y/core` at the version matching this package's declared range must be live:
+1. **Publish the engine and binding-base.** `@surea11y/core` at the version matching this package's declared range must be live:
 
    ```sh
    npm view "@surea11y/core@$(node -p "require('./package.json').dependencies['@surea11y/core']")" version
    ```
 
-   If that errors, stop and publish the engine first.
+   If that errors, stop and publish the engine first. Do the same for `@surea11y/binding-base`, which must be live at its declared range too:
+
+   ```sh
+   npm view "@surea11y/binding-base@$(node -p "require('./package.json').dependencies['@surea11y/binding-base']")" version
+   ```
 
 2. **Refresh and commit the lockfile.** Both workflows use `npm ci`, which requires an up-to-date `package-lock.json`. Regenerate it against the registry so it pins the engine version you just verified:
 
