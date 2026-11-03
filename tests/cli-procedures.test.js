@@ -212,6 +212,27 @@ test('procedures: what it can’t give is a usage error', { skip }, () => {
       /--standard can not be given with --wcag/
     ],
     [['procedures', '--standard-version', 'V1'], /--standard-version goes with --standard/],
+    [
+      ['procedures', '--pack', file('city.js'), '--profile', 'city-1.0', '--wcag', '2.0'],
+      /--wcag can not be given with --profile/
+    ],
+    [
+      ['procedures', '--pack', file('city.js'), '--profile', 'city-1.0', '--wcag-level', 'A'],
+      /--wcag-level can not be given with --profile/
+    ],
+    [
+      [
+        'procedures',
+        '--pack',
+        file('city.js'),
+        '--profile',
+        'city-1.0',
+        '--standard-version',
+        'V1'
+      ],
+      /--standard-version can not be given with --profile/
+    ],
+    [['procedures', '--rules', 'no-such-rule'], /--rules names no rule of core: "no-such-rule"/],
     [['procedures', '1.4.3', '--checklist'], /a single requirement takes no --checklist/],
     [['procedures', '1.4.3', '2.4.7'], /at most one requirement/],
     [['procedures', '--browser'], /--browser is an option of scan, not of procedures/],
