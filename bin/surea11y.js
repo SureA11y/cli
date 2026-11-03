@@ -566,18 +566,16 @@ function findScanProblem(result, args) {
       // some not run, not all.
       if (!ran.length)
         return `${message} None of the --profile ran, so the scan checked against none of them.`;
-      if (args.allowProfilesNotRun) {
-        process.stderr.write(`Warning: ${message}\n`);
-        return null;
-      }
-      return message;
+      if (!args.allowProfilesNotRun) return message;
+      process.stderr.write(`Warning: ${message}\n`);
     }
-    return null;
+    // Otherwise on to the custom rules, which can skip under any profile.
   }
 
   const appliedProfile = result && result.engine && result.engine.profile;
   // The engine matches profile names in any case and reports its own spelling.
   if (
+    !(args.profiles && args.profiles.length > 1) &&
     args.profile &&
     !(appliedProfile && appliedProfile.toLowerCase() === args.profile.toLowerCase())
   ) {
@@ -1663,6 +1661,17 @@ async function runProcedures(args) {
   if (args.standard && (args.wcag || args.profile)) {
     return usage('--standard can not be given with --wcag or --profile');
   }
+  // A pack's --profile names its standard and version, and has no WCAG level.
+  const besideProfile = [
+    ['--wcag', args.wcag],
+    ['--wcag-level', args.wcagLevel],
+    ['--standard-version', args.standardVersion]
+  ].filter(([, given]) => given);
+  if (args.profile && besideProfile.length) {
+    return usage(
+      `${besideProfile.map(([flag]) => flag).join(' and ')} can not be given with --profile, which names a standard and its version`
+    );
+  }
   if (requirement && (args.checklist || automation || tools || args.rules || args.wcagLevel)) {
     return usage('a single requirement takes no --checklist, filter or --wcag-level');
   }
@@ -1674,6 +1683,27 @@ async function runProcedures(args) {
     process.stderr.write(`Error: ${formatError(err)}\n`);
     process.exitCode = 2;
     return;
+  }
+
+  // A rule --rules names that neither core nor a pack given has: a typo
+  // that would filter everything out and pass as an empty list.
+  if (args.rules) {
+    const known = new Set(
+      require('@surea11y/core')
+        .getChecksCatalog()
+        .map((c) => c.ruleId)
+    );
+    for (const pack of packs) {
+      for (const rule of [].concat(pack.rules || [], pack.variants || [])) {
+        if (rule && typeof rule.id === 'string') known.add(rule.id);
+      }
+    }
+    const unknown = splitList(args.rules).filter((r) => !known.has(r));
+    if (unknown.length) {
+      return usage(
+        `--rules names no rule of core${packs.length ? ' or the packs given' : ''}: ${unknown.map((r) => `"${r}"`).join(', ')}`
+      );
+    }
   }
 
   // Which standard: --standard (a pack's, by key or name, or wcag or

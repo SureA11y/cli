@@ -1789,6 +1789,32 @@ test(
 );
 
 test(
+  'CLI: --custom-rules that the engine skips exit 2 in a scan of several profiles too',
+  { skip: PROFILE_LISTS },
+  () => {
+    const file = writeSimplePage('custom-rules-skipped-profiles.html');
+    const rulesFile = path.join(tmpDir, 'custom-rules-skipped-profiles.js');
+    fs.writeFileSync(
+      rulesFile,
+      `const run = (ctx) => ({ ruleId: ctx.rule.ruleId, outcome: 'pass', occurrences: [] });
+      module.exports = [{ id: 'org-bad-meta', meta: { deprecated: true }, runInPage: run }];`
+    );
+    const { status, stderr } = run([
+      'scan',
+      file,
+      '--custom-rules',
+      rulesFile,
+      '--profile',
+      'wcag22-aa',
+      '--profile',
+      'section508'
+    ]);
+    assert.equal(status, 2);
+    assert.match(stderr, /Error: 1 custom rule\(s\) from --custom-rules did not run:/);
+  }
+);
+
+test(
   'CLI: --allow-profiles-not-run does not let a scan stand when none of its profiles ran',
   { skip: PROFILE_LISTS },
   () => {
