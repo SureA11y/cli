@@ -1876,6 +1876,35 @@ test(
   }
 );
 
+test(
+  'CLI: --manual-checks covers every --profile that ran, in any order',
+  { skip: PROFILE_LISTS },
+  () => {
+    const { page } = packFiles('profiles-manual-checks');
+    const sheet = (args, name) => {
+      const checks = path.join(tmpDir, name);
+      const { status, stderr } = run(['scan', page, ...args, '--manual-checks', checks]);
+      assert.notEqual(status, 2, stderr);
+      return checks;
+    };
+    // Two levels of one WCAG: one worksheet, up to the higher, either way.
+    for (const [first, second] of [
+      ['wcag22-a', 'wcag22-aa'],
+      ['wcag22-aa', 'wcag22-a']
+    ]) {
+      const file = sheet(['--profile', first, '--profile', second], `levels-${first}.md`);
+      assert.match(fs.readFileSync(file, 'utf8'), /Levels: A, AA/, `${first} first`);
+    }
+    // Two WCAG versions: a worksheet each, the second named for its own.
+    const file = sheet(['--profile', 'section508', '--profile', 'wcag22-aa'], 'versions.md');
+    assert.match(fs.readFileSync(file, 'utf8'), /^# WCAG 2\.0/);
+    assert.match(
+      fs.readFileSync(path.join(tmpDir, 'versions-wcag-2.2.md'), 'utf8'),
+      /^# WCAG 2\.2/
+    );
+  }
+);
+
 test('CLI: a --profile given twice, in any case, is one; one with no name is a usage error', () => {
   const { page } = packFiles('profile-twice');
   const twice = run(['scan', page, '--profile', 'wcag22-aa', '--profile', 'WCAG22-AA', '--json']);

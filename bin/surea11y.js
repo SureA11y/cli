@@ -1517,12 +1517,12 @@ function packProfile(packs, profile) {
   return null;
 }
 
-// What a scan's worksheet covers: a pack's standard and version where the
-// scan ran one of its profiles and the pack gives procedures, otherwise the
-// WCAG version and level the scan targeted (--wcag and --wcag-level, or the
-// profile's), WCAG 2.2 AA by default.
-function scanProcedureScope(args, packs, core, pages = []) {
-  const profile = firstProfileRun(args, pages);
+// What a profile's worksheet covers: a pack's standard and version where
+// the scan ran one of its profiles and the pack gives procedures, otherwise
+// the WCAG version and level the scan targeted (--wcag and --wcag-level, or
+// the profile's), WCAG 2.2 AA by default. `target` is false for a profile
+// that targets no WCAG level and has no procedures of its own.
+function profileProcedureScope(args, packs, core, profile) {
   const fromPack = packProfile(packs, profile);
   if (fromPack && fromPack.standard.procedures) {
     return { standard: fromPack.standard.key, version: fromPack.version };
@@ -1536,20 +1536,45 @@ function scanProcedureScope(args, packs, core, pages = []) {
   return {
     standard: 'wcag',
     version,
-    levels: levelsUpTo(level),
+    level,
+    target: !!(args.wcag || target || !profile),
     ...(fromPack ? { note: `the pack "${fromPack.pack.name}" gives no procedures` } : {})
   };
 }
 
-// The first --profile the scan ran: with several, one asked first may not
-// have run, and the worksheet follows what was scanned.
-function firstProfileRun(args, pages) {
-  if (!(args.profiles && args.profiles.length > 1)) return args.profile;
+// What a scan's worksheets cover: one per standard and version of the
+// profiles it ran, in their order. WCAG at one version is one worksheet, up
+// to the highest level any profile targets, so --profile wcag22-a --profile
+// wcag22-aa lists A and AA in either order. A profile that targets no WCAG
+// level adds no WCAG of its own beside one that does.
+function scanProcedureScopes(args, packs, core, pages = []) {
+  const scopes = profilesRun(args, pages).map((profile) =>
+    profileProcedureScope(args, packs, core, profile)
+  );
+  const targeted = scopes.filter((s) => s.standard !== 'wcag' || s.target);
+  const kept = targeted.length ? targeted : scopes.slice(0, 1);
+  const out = [];
+  for (const scope of kept) {
+    const same = out.find((s) => s.standard === scope.standard && s.version === scope.version);
+    if (!same) out.push({ ...scope });
+    else if (scope.level && LEVELS.indexOf(scope.level) > LEVELS.indexOf(same.level)) {
+      same.level = scope.level;
+    }
+  }
+  return out.map(({ level, target: _target, ...scope }) =>
+    level ? { ...scope, levels: levelsUpTo(level) } : scope
+  );
+}
+
+// The --profile the scan ran: with several, one asked for may not have
+// run, and the worksheets follow what was scanned.
+function profilesRun(args, pages) {
+  if (!(args.profiles && args.profiles.length > 1)) return [args.profile];
   for (const { result } of pages) {
     const ran = result && result.engine && result.engine.profiles;
-    if (Array.isArray(ran) && ran.length) return ran[0];
+    if (Array.isArray(ran) && ran.length) return ran;
   }
-  return args.profile;
+  return [args.profile];
 }
 
 function htmlText(s) {
@@ -1581,37 +1606,50 @@ function procedureFormat(args) {
 }
 
 // scan --manual-checks: per page, the worksheet of what no rule decides in
-// full, for the standard the scan ran, in its locale.
+// full, for each standard the scan ran, in its locale. The first standard's
+// is at the path given; another's has its standard and version added
+// (manual-checks-en301549-V4.1.1.html).
 function writeManualChecks(args, packs, pages) {
   const core = proceduresApi('--manual-checks');
-  const scope = scanProcedureScope(args, packs, core, pages);
-  if (scope.note) {
-    process.stderr.write(`Note: --manual-checks lists WCAG ${scope.version}'s: ${scope.note}.\n`);
-  }
-  const checklist = core.procedureChecklist({
-    standard: scope.standard,
-    version: scope.version,
-    ...(scope.levels ? { levels: scope.levels } : {}),
-    automation: LEFT_TO_A_PERSON,
-    packs,
-    ...(args.locale ? { locale: args.locale } : {})
-  });
-  if (!checklist) {
-    throw new Error(
-      `--manual-checks: core has no procedures for ${scope.standard} ${scope.version}`
-    );
-  }
+  const scopes = scanProcedureScopes(args, packs, core, pages);
   const format = /\.(md|markdown)$/i.test(args.manualChecks) ? 'markdown' : 'html';
   const options = { format, packs, ...(args.locale ? { locale: args.locale } : {}) };
-  const title = worksheetTitle(core, checklist, args.locale);
-  pages.forEach(({ target }, i) => {
-    const file = numberedPath(args.manualChecks, i + 1);
-    fs.writeFileSync(
-      file,
-      core.renderProcedures(checklist, { ...options, title: `${title} — ${target}` })
-    );
-    process.stderr.write(`Wrote manual checks to: ${file}\n`);
+  scopes.forEach((scope, k) => {
+    if (scope.note) {
+      process.stderr.write(`Note: --manual-checks lists WCAG ${scope.version}'s: ${scope.note}.\n`);
+    }
+    const checklist = core.procedureChecklist({
+      standard: scope.standard,
+      version: scope.version,
+      ...(scope.levels ? { levels: scope.levels } : {}),
+      automation: LEFT_TO_A_PERSON,
+      packs,
+      ...(args.locale ? { locale: args.locale } : {})
+    });
+    if (!checklist) {
+      throw new Error(
+        `--manual-checks: core has no procedures for ${scope.standard} ${scope.version}`
+      );
+    }
+    const title = worksheetTitle(core, checklist, args.locale);
+    const base = k === 0 ? args.manualChecks : standardPath(args.manualChecks, scope);
+    pages.forEach(({ target }, i) => {
+      const file = numberedPath(base, i + 1);
+      fs.writeFileSync(
+        file,
+        core.renderProcedures(checklist, { ...options, title: `${title} — ${target}` })
+      );
+      process.stderr.write(`Wrote manual checks to: ${file}\n`);
+    });
   });
+}
+
+// A worksheet's path for another standard than the first: its standard and
+// version before the extension.
+function standardPath(file, scope) {
+  const ext = path.extname(file);
+  const name = `${scope.standard}-${scope.version}`.replace(/[^A-Za-z0-9._-]+/g, '-');
+  return `${file.slice(0, file.length - ext.length)}-${name}${ext}`;
 }
 
 // The options `surea11y procedures` takes, and the flag of each: any other
