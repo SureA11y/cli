@@ -43,19 +43,22 @@ function page(name, body) {
 
 // One failure of each severity the catalog uses.
 const SERIOUS = '<img src="x.png">'; // img-alt-present
-const MODERATE = '<div aria-expanded="true">x</div>'; // aria-allowed-attr
+const MODERATE = '<label>Name <input autocomplete="banana"></label>'; // autocomplete-valid
 const MINOR = '<h2></h2>'; // empty-heading
-const ONLY = ['--rules', 'img-alt-present,aria-allowed-attr,empty-heading,aria-hidden-body'];
+const ONLY = ['--rules', 'img-alt-present,autocomplete-valid,empty-heading,aria-hidden-body'];
 
 test('--fail-on-severity: a failure below the level is reported but does not fail the run', () => {
   page('mod.html', MODERATE + MINOR);
   const below = run(['scan', 'mod.html', ...ONLY, '--fail-on-severity', 'serious']);
   assert.equal(below.status, 0);
-  assert.match(below.stdout, /aria-allowed-attr {2}\(moderate, .*below --fail-on-severity serious/);
+  assert.match(
+    below.stdout,
+    /autocomplete-valid {2}\(moderate, .*below --fail-on-severity serious/
+  );
   assert.match(below.stdout, /empty-heading {2}\(minor, .*below --fail-on-severity serious/);
   const at = run(['scan', 'mod.html', ...ONLY, '--fail-on-severity', 'moderate']);
   assert.equal(at.status, 1);
-  assert.doesNotMatch(at.stdout, /aria-allowed-attr {2}\(moderate[^)]*below/);
+  assert.doesNotMatch(at.stdout, /autocomplete-valid {2}\(moderate[^)]*below/);
   assert.equal(run(['scan', 'mod.html', ...ONLY]).status, 1, 'without the flag any failure fails');
 });
 
@@ -71,11 +74,11 @@ test('--fail-on-severity: a value that is not a severity is a usage error', () =
 });
 
 test('the summary lists failing rules most severe first', () => {
-  // aria-allowed-attr (moderate) before img-alt-present (serious) in the
+  // autocomplete-valid (moderate) before img-alt-present (serious) in the
   // catalog, empty-heading (minor) between them alphabetically.
   page('all.html', MINOR + MODERATE + SERIOUS);
   const { stdout } = run(['scan', 'all.html', ...ONLY]);
-  const order = ['img-alt-present', 'aria-allowed-attr', 'empty-heading'].map((id) =>
+  const order = ['img-alt-present', 'autocomplete-valid', 'empty-heading'].map((id) =>
     stdout.indexOf(`  ${id}  (`)
   );
   assert.ok(
@@ -92,7 +95,7 @@ test('the summary lists failing rules most severe first', () => {
     `<!doctype html><html lang="en"><head><title>C</title></head><body aria-hidden="true"><main><h1>C</h1>${MODERATE}</main></body></html>`
   );
   const crit = run(['scan', 'crit.html', ...ONLY]).stdout;
-  assert.ok(crit.indexOf('  aria-hidden-body  (') < crit.indexOf('  aria-allowed-attr  ('), crit);
+  assert.ok(crit.indexOf('  aria-hidden-body  (') < crit.indexOf('  autocomplete-valid  ('), crit);
 });
 
 test('several pages: each is scanned, the run fails when any page does', () => {
@@ -174,7 +177,7 @@ test('several pages: --sarif writes one run holding every page', () => {
   assert.deepEqual([...new Set(uris)].sort(), ['s1.html', 's2.html']);
   const rules = log.runs[0].tool.driver.rules.map((r) => r.id);
   assert.equal(rules.length, new Set(rules).size, 'each rule listed once');
-  assert.ok(rules.includes('aria-allowed-attr'), 'a rule only the second page failed is listed');
+  assert.ok(rules.includes('autocomplete-valid'), 'a rule only the second page failed is listed');
 });
 
 test("several pages: --sarif keeps every page's notifications, each naming its page", () => {

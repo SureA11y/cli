@@ -142,7 +142,8 @@ test('procedures <requirement>: one requirement, with finding steps', { skip }, 
   const r = run(['procedures', '1.4.12', '--locale', 'es', '--variants']);
   assert.equal(r.status, 0, r.stderr);
   const d = new JSDOM(r.stdout).window.document;
-  assert.equal(d.title, 'Cómo evaluar WCAG 1.4.12 Text Spacing');
+  // The criterion's title is translated from core 1.15.0, in English before.
+  assert.match(d.title, /^Cómo evaluar WCAG 1\.4\.12 (Espaciado del texto|Text Spacing)$/);
   assert.ok(d.querySelector('details.variants'));
   const json = JSON.parse(run(['procedures', '1.4.3', '--json']).stdout);
   assert.deepEqual(json, core.proceduresFor('1.4.3'));
