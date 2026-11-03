@@ -14,6 +14,13 @@ Needs `@surea11y/core` 1.15.0 for what is below; with an older core, both say so
 - With core 1.15, `--html`'s report has a "What's left for a person" section: for the standard scanned, each requirement with a check no rule decides in full, its outcome in the scan, and those checks with their steps. The CLI passes the scan's packs to the report, so a pack's profile gives its standard. See [`docs/CLI.md`](./docs/CLI.md#html-report).
 - A scan's options on `procedures`, and `procedures`' own on `scan`, are usage errors (exit `2`), as is a standard, version or requirement core has no procedures for.
 
+### Fixed
+
+- A custom rule left out by `--exclude-rules` is no longer read as one that didn't run, so the scan doesn't exit `2`.
+- An option that takes a value, given last or before another option, is a usage error (exit `2`), not dropped with nothing said.
+- `--junit` for several pages keeps a page name with `$` in it as it is.
+- `procedures --standard wcag` takes `--wcag`, as its error said; `--wcag-level` with another `--standard` is a usage error, not ignored.
+
 ## 1.4.0
 
 Requires `@surea11y/core` 1.14.0 and `@surea11y/binding-base` 1.6.0.

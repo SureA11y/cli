@@ -184,6 +184,14 @@ test('procedures: a pack’s standard, by key or by its profile', { skip }, () =
   assert.equal(JSON.parse(one.stdout).title, 'Forms');
 });
 
+test('procedures --standard wcag takes its version from --wcag', { skip }, () => {
+  const r = run(['procedures', '--standard', 'wcag', '--wcag', '2.1', '--json']);
+  assert.equal(r.status, 0, r.stderr);
+  const data = JSON.parse(r.stdout);
+  assert.equal(data.standard, 'wcag');
+  assert.equal(data.version, '2.1');
+});
+
 test('procedures: what it can’t give is a usage error', { skip }, () => {
   const cases = [
     [
@@ -209,8 +217,17 @@ test('procedures: what it can’t give is a usage error', { skip }, () => {
     [['procedures', '--format', 'pdf'], /--format must be "html" or "markdown"/],
     [
       ['procedures', '--standard', 'city', '--wcag', '2.2'],
-      /--standard can not be given with --wcag/
+      /--wcag can not be given with --standard city/
     ],
+    [
+      ['procedures', '--standard', 'best-practice', '--wcag-level', 'AA'],
+      /--wcag-level can not be given with --standard best-practice/
+    ],
+    [
+      ['procedures', '--pack', file('city.js'), '--standard', 'city', '--wcag-level', 'A'],
+      /--wcag-level can not be given with --standard city/
+    ],
+    [['procedures', '-o'], /-o needs a value after it/],
     [['procedures', '--standard-version', 'V1'], /--standard-version goes with --standard/],
     [
       ['procedures', '--standard', 'wcag', '--standard-version', '2.1'],
