@@ -1491,14 +1491,15 @@ function packProfile(packs, profile) {
 // scan ran one of its profiles and the pack gives procedures, otherwise the
 // WCAG version and level the scan targeted (--wcag and --wcag-level, or the
 // profile's), WCAG 2.2 AA by default.
-function scanProcedureScope(args, packs, core) {
-  const fromPack = packProfile(packs, args.profile);
+function scanProcedureScope(args, packs, core, pages = []) {
+  const profile = firstProfileRun(args, pages);
+  const fromPack = packProfile(packs, profile);
   if (fromPack && fromPack.standard.procedures) {
     return { standard: fromPack.standard.key, version: fromPack.version };
   }
   const target =
-    args.profile && typeof core.getProfileWcagTarget === 'function'
-      ? core.getProfileWcagTarget(args.profile, { packs })
+    profile && typeof core.getProfileWcagTarget === 'function'
+      ? core.getProfileWcagTarget(profile, { packs })
       : null;
   const version = args.wcag || (target && target.version) || '2.2';
   const level = args.wcagLevel || (target && target.level) || 'AA';
@@ -1508,6 +1509,17 @@ function scanProcedureScope(args, packs, core) {
     levels: levelsUpTo(level),
     ...(fromPack ? { note: `the pack "${fromPack.pack.name}" gives no procedures` } : {})
   };
+}
+
+// The first --profile the scan ran: with several, one asked first may not
+// have run, and the worksheet follows what was scanned.
+function firstProfileRun(args, pages) {
+  if (!(args.profiles && args.profiles.length > 1)) return args.profile;
+  for (const { result } of pages) {
+    const ran = result && result.engine && result.engine.profiles;
+    if (Array.isArray(ran) && ran.length) return ran[0];
+  }
+  return args.profile;
 }
 
 function htmlText(s) {
@@ -1542,7 +1554,7 @@ function procedureFormat(args) {
 // full, for the standard the scan ran, in its locale.
 function writeManualChecks(args, packs, pages) {
   const core = proceduresApi('--manual-checks');
-  const scope = scanProcedureScope(args, packs, core);
+  const scope = scanProcedureScope(args, packs, core, pages);
   if (scope.note) {
     process.stderr.write(`Note: --manual-checks lists WCAG ${scope.version}'s: ${scope.note}.\n`);
   }
@@ -2049,6 +2061,7 @@ async function runScan(args) {
         informationUri: (pkg.homepage || '').replace(/#.*$/, ''),
         baselineEntries: entriesFor(page),
         packs,
+        ...(args.allowProfilesNotRun ? { allowProfilesNotRun: true } : {}),
         ...(args.failOnLean
           ? { leanFailAs: 'error', leanFailWcagOnly: Boolean(args.leanFailWcagOnly) }
           : {})
@@ -2063,6 +2076,7 @@ async function runScan(args) {
       renderJunitReport(result, {
         baselineEntries: entriesFor(page),
         packs,
+        ...(args.allowProfilesNotRun ? { allowProfilesNotRun: true } : {}),
         ...(args.failOnLean
           ? { leanFailAs: 'failure', leanFailWcagOnly: Boolean(args.leanFailWcagOnly) }
           : {})

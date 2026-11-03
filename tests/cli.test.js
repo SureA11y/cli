@@ -1807,6 +1807,43 @@ test(
   }
 );
 
+test(
+  'CLI: --allow-profiles-not-run carries to SARIF and JUnit, and --manual-checks follows a profile that ran',
+  { skip: PROFILE_LISTS },
+  () => {
+    const { page } = packFiles('profiles-allowed-reports');
+    const sarif = path.join(tmpDir, 'profiles-allowed.sarif');
+    const junit = path.join(tmpDir, 'profiles-allowed.xml');
+    const checks = path.join(tmpDir, 'profiles-allowed.md');
+    const { status, stderr } = run([
+      'scan',
+      page,
+      '--profile',
+      'nope-1.0',
+      '--profile',
+      'section508',
+      '--allow-profiles-not-run',
+      '--sarif',
+      sarif,
+      '--junit',
+      junit,
+      '--manual-checks',
+      checks
+    ]);
+    assert.notEqual(status, 2, stderr);
+    const invocation = JSON.parse(fs.readFileSync(sarif, 'utf8')).runs[0].invocations[0];
+    assert.equal(invocation.executionSuccessful, true);
+    assert.deepEqual(
+      invocation.toolExecutionNotifications.map((n) => n.level),
+      ['warning']
+    );
+    const xml = fs.readFileSync(junit, 'utf8');
+    assert.match(xml, /<testsuite name="Profiles"[^>]* errors="0" skipped="1"/);
+    // section508 is WCAG 2.0's; the first --profile, which did not run, would give 2.2.
+    assert.match(fs.readFileSync(checks, 'utf8'), /^# WCAG 2\.0/);
+  }
+);
+
 test('CLI: a --profile given twice, in any case, is one; one with no name is a usage error', () => {
   const { page } = packFiles('profile-twice');
   const twice = run(['scan', page, '--profile', 'wcag22-aa', '--profile', 'WCAG22-AA', '--json']);
