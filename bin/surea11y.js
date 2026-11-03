@@ -816,7 +816,8 @@ function printSummary(
         process.stdout.write(`    - ${occ.selector || '(no selector)'}\n      ${occ.summary}\n`);
         if (occ.hint) process.stdout.write(`      hint: ${occ.hint}\n`);
         if (Array.isArray(occ.conditions)) {
-          process.stdout.write(`      seen in: ${occ.conditions.join(', ')}\n`);
+          // Semicolons between: a condition's label has commas of its own.
+          process.stdout.write(`      seen in: ${occ.conditions.join('; ')}\n`);
         }
       }
       if (failOccurrences.length > 5) {
@@ -1751,8 +1752,13 @@ async function runProcedures(args) {
     }
     options = { standard: fromPack.standard.key, version: fromPack.version };
   } else {
-    if (args.standardVersion)
-      return usage('--standard-version goes with --standard; for WCAG, use --wcag');
+    if (args.standardVersion) {
+      return usage(
+        args.standard
+          ? '--standard wcag takes its version from --wcag, not --standard-version'
+          : '--standard-version goes with --standard; for WCAG, use --wcag'
+      );
+    }
     options = {
       standard: 'wcag',
       ...(args.wcag ? { version: args.wcag } : {}),
@@ -1810,6 +1816,13 @@ async function runProcedures(args) {
 }
 
 async function runScan(args) {
+  // --allow-profiles-not-run lets some of several --profile not run; with
+  // one or none it has nothing to allow.
+  if (args.allowProfilesNotRun && !(args.profiles && args.profiles.length > 1)) {
+    process.stderr.write(
+      'Warning: --allow-profiles-not-run goes with several --profile; it changes nothing here.\n'
+    );
+  }
   // --max-pages limits what --sitemap adds: a whole number above 0.
   if (args.maxPages !== undefined) {
     if (!args.sitemap) {
