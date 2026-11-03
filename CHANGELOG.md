@@ -4,7 +4,7 @@ All notable changes to this package are documented here. This project adheres to
 
 ## Unreleased
 
-Needs `@surea11y/core` 1.15.0 for what is below; with an older core, both say so and exit `2`, and everything else works as before.
+The additions below need `@surea11y/core` 1.15.0; with an older core, several `--profile`, `--manual-checks` and `procedures` say so and exit `2`, `--html`'s report has no "What's left for a person" section, and everything else works as before.
 
 ### Added
 
@@ -12,14 +12,15 @@ Needs `@surea11y/core` 1.15.0 for what is below; with an older core, both say so
 - `--manual-checks <path>` writes, next to a scan, the worksheet of what it leaves to a person: the checks no rule decides in full, each once, for the standard scanned (a pack's, under its own numbers, where its profile ran and it gives procedures; otherwise WCAG at the scan's version and level, 2.2 A and AA by default), in `--locale`'s language. A person records a result and notes per check, kept in the browser and downloaded as JSON, with each requirement's result rolled up, or as CSV. One worksheet per page, numbered as `--html`'s, each titled with its page; a path ending in `.md` writes Markdown. It never changes the exit code. See [`docs/CLI.md`](./docs/CLI.md#manual-checks).
 - `surea11y procedures [requirement]` writes how a person assesses each requirement of a standard by hand, with no scan: a reference, or a worksheet with `--checklist`, in HTML or Markdown (`--format`, or an `.md` output), to a file (`-o`) or to standard output, or as JSON (`--json`). WCAG at `--wcag` and `--wcag-level`, a pack's standard by `--standard` and `--standard-version` or by its `--profile`, or one requirement; `--automation`, `--tools` and `--rules` filter it, and `--locale`, `--title`, `--variants` and `--no-record` shape it. See [`docs/CLI.md`](./docs/CLI.md#procedures-how-to-assess-by-hand).
 - With core 1.15, `--html`'s report has a "What's left for a person" section: for the standard scanned, each requirement with a check no rule decides in full, its outcome in the scan, and those checks with their steps. The CLI passes the scan's packs to the report, so a pack's profile gives its standard. See [`docs/CLI.md`](./docs/CLI.md#html-report).
-- A scan's options on `procedures`, and `procedures`' own on `scan`, are usage errors (exit `2`), as is a standard, version or requirement core has no procedures for.
+- A scan's options on `procedures`, and `procedures`' own on `scan`, are usage errors (exit `2`), as is a standard, version or requirement core has no procedures for, or a `--rules` entry that is no rule of core or of the packs given.
 
 ### Fixed
 
 - A custom rule left out by `--exclude-rules` is no longer read as one that didn't run, so the scan doesn't exit `2`.
 - An option that takes a value, given last or before another option, is a usage error (exit `2`), not dropped with nothing said.
 - `--junit` for several pages keeps a page name with `$` in it as it is.
-- `procedures --standard wcag` takes `--wcag`, as its error said; `--wcag-level` with another `--standard` is a usage error, not ignored.
+- `--sarif` for several pages keeps every page's notifications (a rule that did not complete, an unsuccessful run), each naming its page, where it kept only the first page's; the merged run is successful only when every page's was.
+- The summary of a scan at several widths and color schemes separates the combinations a finding was seen in with semicolons (`seen in: dark, width 1280; dark, width 320`), since a combination's name has commas of its own.
 
 ## 1.4.0
 
