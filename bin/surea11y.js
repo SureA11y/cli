@@ -1477,12 +1477,16 @@ function levelsUpTo(level) {
   return LEVELS.slice(0, LEVELS.indexOf(level) + 1);
 }
 
-// The pack whose standard has the profile, and the version it targets.
+// The pack whose standard has the profile, and the version it targets. The
+// name in any case, as a scan reads it.
 function packProfile(packs, profile) {
+  const wanted = typeof profile === 'string' ? profile.trim().toLowerCase() : '';
+  if (!wanted) return null;
   for (const pack of packs || []) {
     const st = pack.standard;
-    const p = st && st.profiles && profile ? st.profiles[profile] : null;
-    if (p) return { pack, standard: st, version: p.version };
+    const profiles = st && st.profiles && typeof st.profiles === 'object' ? st.profiles : {};
+    const id = Object.keys(profiles).find((key) => key.toLowerCase() === wanted);
+    if (id) return { pack, standard: st, version: profiles[id].version };
   }
   return null;
 }

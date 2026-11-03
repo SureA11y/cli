@@ -163,6 +163,16 @@ test('procedures: a pack’s standard, by key or by its profile', { skip }, () =
     '--checklist'
   ]);
   assert.equal(byProfile.stdout, byKey.stdout);
+  // The profile in any case, as a scan reads it.
+  const upper = run([
+    'procedures',
+    '--pack',
+    file('city.js'),
+    '--profile',
+    'CITY-1.0',
+    '--checklist'
+  ]);
+  assert.equal(upper.stdout, byKey.stdout, upper.stderr);
   const json = JSON.parse(
     run(['procedures', '--pack', file('city.js'), '--standard', 'City Standard', '--json']).stdout
   );
