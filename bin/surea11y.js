@@ -176,6 +176,17 @@ https://github.com/SureA11y/cli/blob/main/docs/CLI.md
 `);
 }
 
+// The value an option takes: refused when the option is last or the next
+// word is another option, which would otherwise be read as its value or
+// leave the option unset with nothing said.
+function valueAfter(argv, i, option) {
+  const value = argv[i];
+  if (typeof value !== 'string' || value.startsWith('--')) {
+    throw new Error(`${option} needs a value after it. See --help.`);
+  }
+  return value;
+}
+
 function parseArgs(argv) {
   const out = { _: [], json: false };
   for (let i = 0; i < argv.length; i++) {
@@ -185,28 +196,28 @@ function parseArgs(argv) {
         out.json = true;
         break;
       case '--locale':
-        out.locale = argv[++i];
+        out.locale = valueAfter(argv, ++i, a);
         break;
       case '--rules':
-        out.rules = argv[++i];
+        out.rules = valueAfter(argv, ++i, a);
         break;
       case '--exclude-rules':
-        out.excludeRules = argv[++i];
+        out.excludeRules = valueAfter(argv, ++i, a);
         break;
       case '--tags':
-        out.tags = argv[++i];
+        out.tags = valueAfter(argv, ++i, a);
         break;
       case '--include-mode':
-        out.includeMode = argv[++i];
+        out.includeMode = valueAfter(argv, ++i, a);
         break;
       case '--context':
-        out.context = argv[++i];
+        out.context = valueAfter(argv, ++i, a);
         break;
       case '--custom-rules':
-        (out.customRules = out.customRules || []).push(argv[++i]);
+        (out.customRules = out.customRules || []).push(valueAfter(argv, ++i, a));
         break;
       case '--pack':
-        (out.packs = out.packs || []).push(argv[++i]);
+        (out.packs = out.packs || []).push(valueAfter(argv, ++i, a));
         break;
       case '--profile': {
         // Repeatable: a scan of several profiles at once. `profile` stays
@@ -224,10 +235,10 @@ function parseArgs(argv) {
         break;
       }
       case '--wcag':
-        out.wcag = argv[++i];
+        out.wcag = valueAfter(argv, ++i, a);
         break;
       case '--wcag-level':
-        out.wcagLevel = argv[++i];
+        out.wcagLevel = valueAfter(argv, ++i, a);
         break;
       case '--best-practices':
         out.bestPractices = true;
@@ -239,28 +250,28 @@ function parseArgs(argv) {
         out.allowProfilesNotRun = true;
         break;
       case '--baseline':
-        out.baseline = argv[++i];
+        out.baseline = valueAfter(argv, ++i, a);
         break;
       case '--write-baseline':
-        out.writeBaseline = argv[++i];
+        out.writeBaseline = valueAfter(argv, ++i, a);
         break;
       case '--html':
-        out.html = argv[++i];
+        out.html = valueAfter(argv, ++i, a);
         break;
       case '--sarif':
-        out.sarif = argv[++i];
+        out.sarif = valueAfter(argv, ++i, a);
         break;
       case '--junit':
-        out.junit = argv[++i];
+        out.junit = valueAfter(argv, ++i, a);
         break;
       case '--urls':
-        out.urls = argv[++i];
+        out.urls = valueAfter(argv, ++i, a);
         break;
       case '--sitemap':
-        out.sitemap = argv[++i];
+        out.sitemap = valueAfter(argv, ++i, a);
         break;
       case '--max-pages':
-        out.maxPages = argv[++i];
+        out.maxPages = valueAfter(argv, ++i, a);
         break;
       case '--browser':
         out.browser = true;
@@ -272,19 +283,19 @@ function parseArgs(argv) {
         out.liveRegions = true;
         break;
       case '--wait-for':
-        out.waitFor = argv[++i];
+        out.waitFor = valueAfter(argv, ++i, a);
         break;
       case '--wait-timeout':
-        out.waitTimeout = argv[++i];
+        out.waitTimeout = valueAfter(argv, ++i, a);
         break;
       case '--width':
-        out.width = argv[++i];
+        out.width = valueAfter(argv, ++i, a);
         break;
       case '--color-scheme':
-        out.colorScheme = argv[++i];
+        out.colorScheme = valueAfter(argv, ++i, a);
         break;
       case '--fail-on-severity':
-        out.failOnSeverity = argv[++i];
+        out.failOnSeverity = valueAfter(argv, ++i, a);
         break;
       case '--fail-on-lean':
         out.failOnLean = true;
@@ -293,35 +304,35 @@ function parseArgs(argv) {
         out.leanFailWcagOnly = true;
         break;
       case '--migrate-baseline':
-        out.migrateBaseline = argv[++i];
+        out.migrateBaseline = valueAfter(argv, ++i, a);
         break;
       case '--manual-checks':
-        out.manualChecks = argv[++i];
+        out.manualChecks = valueAfter(argv, ++i, a);
         break;
       case '--checklist':
         out.checklist = true;
         break;
       case '--standard':
-        out.standard = argv[++i];
+        out.standard = valueAfter(argv, ++i, a);
         break;
       case '--standard-version':
-        out.standardVersion = argv[++i];
+        out.standardVersion = valueAfter(argv, ++i, a);
         break;
       case '--automation':
-        out.automation = argv[++i];
+        out.automation = valueAfter(argv, ++i, a);
         break;
       case '--tools':
-        out.tools = argv[++i];
+        out.tools = valueAfter(argv, ++i, a);
         break;
       case '--format':
-        out.format = argv[++i];
+        out.format = valueAfter(argv, ++i, a);
         break;
       case '-o':
       case '--output':
-        out.output = argv[++i];
+        out.output = valueAfter(argv, ++i, a);
         break;
       case '--title':
-        out.title = argv[++i];
+        out.title = valueAfter(argv, ++i, a);
         break;
       case '--variants':
         out.variants = true;
@@ -592,7 +603,11 @@ function findScanProblem(result, args) {
     return `--profile "${args.profile}" was not applied: no such profile${args.packs && args.packs.length ? ' in core or the packs given' : " in core (a pack's profile needs --pack)"}. Nothing was scanned against it.`;
   }
 
-  const skipped = (result && result.skippedCustomRules) || [];
+  // A rule --exclude-rules (or the selection) left out was asked to be: as
+  // the bindings and matchers read it, that isn't a rule that failed to run.
+  const skipped = ((result && result.skippedCustomRules) || []).filter(
+    (s) => !(s && (s.excluded === true || s.reason === 'excluded by the selection.'))
+  );
   if (skipped.length) {
     const lines = skipped.map((s) => `  - ${s.id ? `"${s.id}"` : '(no id)'}: ${s.reason}`);
     return `${skipped.length} custom rule(s) from --custom-rules did not run:\n${lines.join('\n')}\nSee docs/CLI.md#custom-rules.`;
@@ -1402,8 +1417,8 @@ function mergeJunit(texts, pages) {
     );
     suites.push(
       body
-        .replace(/<testsuite name="/g, `<testsuite name="${prefix} — `)
-        .replace(/<testcase classname="/g, `<testcase classname="${prefix}/`)
+        .replace(/<testsuite name="/g, () => `<testsuite name="${prefix} — `)
+        .replace(/<testcase classname="/g, () => `<testcase classname="${prefix}/`)
         .replace(/^\n+|\n+$/g, '')
     );
   });
@@ -1686,8 +1701,21 @@ async function runProcedures(args) {
   const badTools = (tools || []).filter((t) => !TOOLS.includes(t));
   if (badTools.length)
     return usage(`--tools takes ${TOOLS.join(', ')}, not "${badTools.join(', ')}"`);
-  if (args.standard && (args.wcag || args.profile)) {
-    return usage('--standard can not be given with --wcag or --profile');
+  // --standard wcag takes its version from --wcag; any other standard
+  // has its own, and no WCAG level.
+  const isWcagStandard = !!args.standard && args.standard.toLowerCase() === 'wcag';
+  if (args.standard && args.profile) {
+    return usage('--standard can not be given with --profile');
+  }
+  if (args.standard && !isWcagStandard && args.wcag) {
+    return usage(
+      `--wcag can not be given with --standard ${args.standard}; it gives --standard wcag its version`
+    );
+  }
+  if (args.standard && !isWcagStandard && args.wcagLevel) {
+    return usage(
+      `--wcag-level can not be given with --standard ${args.standard}, which has no WCAG level`
+    );
   }
   // A pack's --profile names its standard and version, and has no WCAG level.
   const besideProfile = [
@@ -1737,7 +1765,7 @@ async function runProcedures(args) {
   // Which standard: --standard (a pack's, by key or name, or wcag or
   // best-practice), a pack's --profile, or WCAG at --wcag and --wcag-level.
   let options;
-  if (args.standard && !['wcag', 'WCAG'].includes(args.standard)) {
+  if (args.standard && !isWcagStandard) {
     options = {
       standard: args.standard,
       ...(args.standardVersion ? { version: args.standardVersion } : {})

@@ -228,6 +228,15 @@ test('several pages: --junit writes one file, suites named after their page', ()
   assert.equal(Number(root[2]), 1);
 });
 
+test('several pages: --junit keeps a page name with $ in it as it is', () => {
+  page('p$&.html', SERIOUS);
+  page('q.html', '<img src="x.png" alt="Logo">');
+  run(['scan', 'p$&.html', 'q.html', '--junit', 'dollar.xml', ...ONLY]);
+  const xml = fs.readFileSync(path.join(dir, 'dollar.xml'), 'utf8');
+  assert.match(xml, /<testsuite name="p\$&amp;\.html — WCAG 1\.1\.1"/);
+  assert.match(xml, /<testcase classname="p\$&amp;\.html\/wcag-1\.1\.1" name="img-alt-present"/);
+});
+
 test('several pages: the baseline names each page, so one page cannot hide another', () => {
   page('b1.html', SERIOUS);
   page('b2.html', '<p>clean for now</p>');

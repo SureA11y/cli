@@ -613,7 +613,7 @@ surea11y procedures --wcag-level A --checklist --json > checklist.json
 | `--checklist` | A worksheet: each procedure once, with a result and notes to record. Without it, a reference: every requirement and each of its facets. |
 | `--wcag <version>` | WCAG `2.0`, `2.1` or `2.2` (the default). |
 | `--wcag-level <level>` | Up to level `A`, `AA` or `AAA`; every level by default. |
-| `--standard <key>` | A pack's standard, by key (`en301549`) or name (`"EN 301 549"`), with `--pack`; or `best-practice`. Not with `--wcag` or `--profile`. |
+| `--standard <key>` | A pack's standard, by key (`en301549`) or name (`"EN 301 549"`), with `--pack`; or `best-practice`; or `wcag`, at `--wcag`'s version. Not with `--profile`, and only `wcag` takes `--wcag` and `--wcag-level`. |
 | `--standard-version <version>` | With `--standard`: its version; by default the latest that has procedures. |
 | `--profile <name>` | A pack's profile, for its standard and version, with `--pack`. |
 | `--pack <name-or-path>` | A pack, for its standard and its rules' steps. Repeatable. See [Packs](#packs). |

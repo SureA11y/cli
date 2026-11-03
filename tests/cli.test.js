@@ -504,6 +504,58 @@ test('CLI: --sarif works alongside --html and --json (all three artifacts from t
   assert.ok(fs.existsSync(reportPath));
 });
 
+test('CLI: a custom rule --exclude-rules leaves out is not a rule that did not run', () => {
+  const file = path.join(tmpDir, 'custom-rules-excluded.html');
+  fs.writeFileSync(
+    file,
+    '<!doctype html><html lang="en"><head><title>T</title></head><body><main><button onclick="go()">Go</button></main></body></html>'
+  );
+  const rulesFile = path.join(tmpDir, 'custom-rules-excluded.js');
+  fs.writeFileSync(
+    rulesFile,
+    `module.exports = [{
+      id: 'org-no-inline-onclick',
+      meta: { title: 'No inline onclick handlers' },
+      runInPage(ctx) {
+        return { ruleId: ctx.rule.ruleId, outcome: 'fail', occurrences: [{ selector: 'button', summary: 'Inline onclick.' }] };
+      }
+    }];`
+  );
+  const { stdout, stderr, status } = run([
+    'scan',
+    file,
+    '--custom-rules',
+    rulesFile,
+    '--exclude-rules',
+    'org-no-inline-onclick',
+    '--json'
+  ]);
+  assert.notEqual(status, 2, stderr);
+  assert.doesNotMatch(stderr || '', /did not run/);
+  const result = JSON.parse(stdout);
+  assert.ok(!result.checksResults.some((c) => c.ruleId === 'org-no-inline-onclick'));
+});
+
+test('CLI: an option that takes a value, given without one, is a usage error', () => {
+  const file = writeSimplePage('missing-value.html');
+  for (const option of [
+    '--baseline',
+    '--fail-on-severity',
+    '--sarif',
+    '--junit',
+    '--html',
+    '--manual-checks',
+    '--context'
+  ]) {
+    const last = run(['scan', file, option]);
+    assert.equal(last.status, 2, option);
+    assert.match(last.stderr, new RegExp(`${option} needs a value after it`), option);
+  }
+  const beforeAnother = run(['scan', file, '--baseline', '--json']);
+  assert.equal(beforeAnother.status, 2);
+  assert.match(beforeAnother.stderr, /--baseline needs a value after it/);
+});
+
 test('CLI: --custom-rules loads a runtime rule from a file exporting an array of descriptors', () => {
   const file = path.join(tmpDir, 'custom-rules-array.html');
   fs.writeFileSync(
