@@ -3,10 +3,10 @@
 Command-line WCAG 2.2 accessibility scanner for static HTML, or rendered pages with `--browser` — several pages per run, baseline and severity gating, HTML, SARIF and JUnit reports, custom rules. Powered by [`@surea11y/core`](https://github.com/SureA11y/core), the deterministic engine that tells you what it *can't* tell you.
 
 ```sh
-npx @surea11y/cli scan ./index.html
-npx @surea11y/cli scan https://example.com/ --wcag 2.2
-npx @surea11y/cli scan ./dist/index.html ./dist/pricing.html --fail-on-severity serious
-npx @surea11y/cli scan https://app.example.com/ --browser
+npx surea11y scan ./index.html
+npx surea11y scan https://example.com/ --wcag 2.2
+npx surea11y scan ./dist/index.html ./dist/pricing.html --fail-on-severity serious
+npx surea11y scan https://app.example.com/ --browser
 ```
 
 ## Install
@@ -15,6 +15,8 @@ npx @surea11y/cli scan https://app.example.com/ --browser
 npm install -g @surea11y/cli          # globally
 npm install --save-dev @surea11y/cli  # or per-project, for CI
 ```
+
+For a one-off run without installing, use `npx surea11y scan ...`; the `surea11y` package is a thin entry point that runs this CLI.
 
 Requires Node.js `^20.19.0 || ^22.13.0 || >=24.0.0`.
 

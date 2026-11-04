@@ -3,11 +3,11 @@
 `@surea11y/cli` provides `surea11y`, a small command-line scanner (`bin/surea11y.js`) for ad hoc scans and CI, on top of the [`@surea11y/core`](https://github.com/SureA11y/core) library API described in [`INTEGRATION.md`](https://github.com/SureA11y/core/blob/main/docs/INTEGRATION.md).
 
 ```sh
-npx @surea11y/cli scan ./index.html
-npx @surea11y/cli scan https://example.com/
-npx @surea11y/cli scan ./index.html ./about.html --urls more-pages.txt
-npx @surea11y/cli scan https://app.example.com/ --browser
-npx @surea11y/cli procedures --wcag-level AA --checklist -o audit.html
+npx surea11y scan ./index.html
+npx surea11y scan https://example.com/
+npx surea11y scan ./index.html ./about.html --urls more-pages.txt
+npx surea11y scan https://app.example.com/ --browser
+npx surea11y procedures --wcag-level AA --checklist -o audit.html
 ```
 
 Or install it once:
@@ -16,6 +16,8 @@ Or install it once:
 npm install -g @surea11y/cli          # globally
 npm install --save-dev @surea11y/cli  # or per-project, for CI
 ```
+
+For a one-off run without installing, use `npx surea11y scan ...`; the `surea11y` package is a thin entry point that runs this CLI.
 
 ## What it can and can't scan
 
