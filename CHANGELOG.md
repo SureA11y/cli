@@ -2,25 +2,25 @@
 
 All notable changes to this package are documented here. This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## 1.5.0
 
-The additions below need `@surea11y/core` 1.15.0; with an older core, several `--profile`, `--manual-checks` and `procedures` say so and exit `2`, `--html`'s report has no "What's left for a person" section, and everything else works as before.
+Requires `@surea11y/core` 1.15.0 and `@surea11y/binding-base` 1.7.0.
 
 ### Added
 
-- `--profile` can be given more than once, to judge each page by several profiles at once (`@surea11y/core` 1.15): a failure under any of them exits `1`, the summary lists them, and a profile that didn't run exits `2`, listed with why, or is a warning with `--allow-profiles-not-run`, in the SARIF and JUnit reports too. `--manual-checks` writes a worksheet for each standard and version of the profiles that ran, WCAG at one version up to the highest level asked, whatever their order. `procedures` takes one `--profile`. See [`docs/CLI.md`](./docs/CLI.md#several-profiles).
-- `--manual-checks <path>` writes, next to a scan, the worksheet of what it leaves to a person: the checks no rule decides in full, each once, for the standard scanned (a pack's, under its own numbers, where its profile ran and it gives procedures; otherwise WCAG at the scan's version and level, 2.2 A and AA by default), in `--locale`'s language. A person records a result and notes per check, kept in the browser and downloaded as JSON, with each requirement's result rolled up, or as CSV. One worksheet per page, numbered as `--html`'s, each titled with its page; a path ending in `.md` writes Markdown. It never changes the exit code. See [`docs/CLI.md`](./docs/CLI.md#manual-checks).
-- `surea11y procedures [requirement]` writes how a person assesses each requirement of a standard by hand, with no scan: a reference, or a worksheet with `--checklist`, in HTML or Markdown (`--format`, or an `.md` output), to a file (`-o`) or to standard output, or as JSON (`--json`). WCAG at `--wcag` and `--wcag-level`, a pack's standard by `--standard` and `--standard-version` or by its `--profile`, or one requirement; `--automation`, `--tools` and `--rules` filter it, and `--locale`, `--title`, `--variants` and `--no-record` shape it. See [`docs/CLI.md`](./docs/CLI.md#procedures-how-to-assess-by-hand).
-- With core 1.15, `--html`'s report has a "What's left for a person" section: for the standard scanned, each requirement with a check no rule decides in full, its outcome in the scan, and those checks with their steps. The CLI passes the scan's packs to the report, so a pack's profile gives its standard. See [`docs/CLI.md`](./docs/CLI.md#html-report).
-- A scan's options on `procedures`, and `procedures`' own on `scan`, are usage errors (exit `2`), as is a standard, version or requirement core has no procedures for, or a `--rules` entry that is no rule of core or of the packs given.
+- `--profile` can be repeated, to judge each page by several profiles at once: a failure under any of them exits `1`, and a profile that didn't run exits `2`, or is a warning with `--allow-profiles-not-run`, in the SARIF and JUnit reports too. See [`docs/CLI.md`](./docs/CLI.md#several-profiles).
+- Assessing by hand: `--manual-checks <path>` writes, next to a scan, a worksheet of the checks no rule decides in full, for each standard scanned, in `--locale`'s language (HTML, or Markdown for an `.md` path); `surea11y procedures [requirement]` writes how a person assesses a standard's requirements with no scan, as a reference or a worksheet (`--checklist`), in HTML, Markdown or JSON; and `--html`'s report has a "What's left for a person" section. See [`docs/CLI.md`](./docs/CLI.md#manual-checks) and [`docs/CLI.md`](./docs/CLI.md#procedures-how-to-assess-by-hand).
+
+### Changed
+
+- Results follow core 1.15: where only WAI-ARIA or the HTML content model is broken, the ARIA and HTML structure rules ask instead of failing, so a run that failed only on them now exits `0`; a framed document is no page of its own. Baselines still match. See core's [`CHANGELOG.md`](https://github.com/SureA11y/core/blob/main/CHANGELOG.md).
 
 ### Fixed
 
-- A custom rule left out by `--exclude-rules` is no longer read as one that didn't run, so the scan doesn't exit `2`.
-- An option that takes a value, given last or before another option, is a usage error (exit `2`), not dropped with nothing said.
-- `--junit` for several pages keeps a page name with `$` in it as it is.
-- `--sarif` for several pages keeps every page's notifications (a rule that did not complete, an unsuccessful run), each naming its page, where it kept only the first page's; the merged run is successful only when every page's was.
-- The summary of a scan at several widths and color schemes separates the combinations a finding was seen in with semicolons (`seen in: dark, width 1280; dark, width 320`), since a combination's name has commas of its own.
+- Usage errors (exit `2`) instead of a silent run: an option with no value, a scan's options on `procedures` and the reverse, and a standard, requirement or `--rules` entry with no procedures.
+- A custom rule left out by `--exclude-rules` no longer exits `2` as a rule that didn't run.
+- Scans of several pages: `--sarif` keeps every page's notifications, and `--junit` keeps a `$` in a page name.
+- The summary separates the width and color scheme combinations a finding was seen in with semicolons.
 
 ## 1.4.0
 
