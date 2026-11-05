@@ -94,6 +94,17 @@ The release workflow enforces this — it resolves both declared ranges against 
    npm view "@surea11y/cli@$(node -p "require('./package.json').version")" dist.attestations
    ```
 
+## The `surea11y` package
+
+[`surea11y`](https://github.com/SureA11y/surea11y) is what makes `npx surea11y` work: a small package whose `bin.js` requires `@surea11y/cli/bin/surea11y.js`. It has no tags or GitHub releases, and it is published by hand from its own repository, so nothing here releases it.
+
+It doesn't need a release for each one of this package. Its `^` range gives a fresh install the newest 1.x of this package, so its version number can fall behind this one. Release it when:
+
+- **This package has a new major version.** The range doesn't reach it, so `npx surea11y` stays on the old major with nothing said.
+- **`bin/surea11y.js` moves, or an `exports` map hides it.** Either breaks `npx surea11y`, and within 1.x it reaches users as soon as this package publishes, so treat it as a breaking change: a major version, with `surea11y` released after it.
+- **`engines` changes.** The two should declare the same Node versions.
+- **Its README is out of date.** The npm page only changes on a publish.
+
 ## Developing against an unpublished engine
 
 Normally `npm ci` is all you need. But when this package has to be tested against a version of `@surea11y/core` that isn't on the registry yet — the situation for every future split or engine change that lands here first — install the engine from a locally packed tarball:
