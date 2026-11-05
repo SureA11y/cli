@@ -1631,6 +1631,16 @@ test('CLI: --write-baseline --fail-on-lean records the likely failures, and --ba
   assert.doesNotMatch(without.stdout, /baseline likely failures/);
 });
 
+// Core's table of moved reason codes covers one minor release (its
+// docs/BASELINE.md, "Upgrading"), so these tests need a core that still has
+// img-alt-present's and area-alt-present's from 1.14. 1.15 moved none and
+// dropped them. Ask core itself.
+const BASELINE_MOVES = (() => {
+  const { migrateBaselineEntries } = require('@surea11y/core/baseline');
+  const [entry] = migrateBaselineEntries([{ ruleId: 'img-alt-present', reasonCode: 'DEFAULT' }]);
+  return entry.reasonCode === 'DEFAULT' && 'needs a core that moved these reason codes';
+})();
+
 const OLD_BASELINE = {
   version: 1,
   generatedAt: '2026-10-01T00:00:00.000Z',
@@ -1650,41 +1660,49 @@ const OLD_BASELINE = {
   ]
 };
 
-test('CLI: --migrate-baseline without a page makes the moves that need no scan', () => {
-  const file = path.join(tmpDir, 'migrate-noscan.json');
-  fs.writeFileSync(file, JSON.stringify(OLD_BASELINE));
-  const r = run(['scan', '--migrate-baseline', file], { stdio: ['ignore', 'pipe', 'pipe'] });
-  assert.equal(r.status, 0);
-  const migrated = JSON.parse(fs.readFileSync(file, 'utf8'));
-  assert.equal(migrated.generatedAt, OLD_BASELINE.generatedAt);
-  assert.deepEqual(
-    migrated.entries.map((e) => e.reasonCode),
-    ['TEXT_ALTERNATIVE_MISSING', 'DEFAULT'],
-    "area-alt-present's code was split, so it needs the finding"
-  );
-});
+test(
+  'CLI: --migrate-baseline without a page makes the moves that need no scan',
+  { skip: BASELINE_MOVES },
+  () => {
+    const file = path.join(tmpDir, 'migrate-noscan.json');
+    fs.writeFileSync(file, JSON.stringify(OLD_BASELINE));
+    const r = run(['scan', '--migrate-baseline', file], { stdio: ['ignore', 'pipe', 'pipe'] });
+    assert.equal(r.status, 0);
+    const migrated = JSON.parse(fs.readFileSync(file, 'utf8'));
+    assert.equal(migrated.generatedAt, OLD_BASELINE.generatedAt);
+    assert.deepEqual(
+      migrated.entries.map((e) => e.reasonCode),
+      ['TEXT_ALTERNATIVE_MISSING', 'DEFAULT'],
+      "area-alt-present's code was split, so it needs the finding"
+    );
+  }
+);
 
-test("CLI: --migrate-baseline against a scan takes each finding's code, and accepts nothing new", () => {
-  const page = leanPage(
-    'migrate-page',
-    '<!doctype html><html lang="en"><head><title>T</title></head><body><img src="x.png"><img src="m.png" alt="Map" usemap="#m"><map name="m"><area href="/a" alt="" shape="rect" coords="0,0,10,10"></map><img src="z.png"></body></html>'
-  );
-  const file = path.join(tmpDir, 'migrate-scan.json');
-  fs.writeFileSync(file, JSON.stringify(OLD_BASELINE));
-  const rules = ['--rules', 'img-alt-present,area-alt-present'];
-  const r = run(['scan', page, ...rules, '--migrate-baseline', file]);
-  assert.equal(r.status, 0, 'never fails the build');
-  assert.match(r.stdout, /img-alt-present/);
-  const migrated = JSON.parse(fs.readFileSync(file, 'utf8'));
-  assert.deepEqual(
-    migrated.entries.map((e) => e.reasonCode),
-    ['TEXT_ALTERNATIVE_MISSING', 'TEXT_ALTERNATIVE_EMPTY']
-  );
-  // The second image without alt is still new against it.
-  const check = JSON.parse(run(['scan', page, ...rules, '--baseline', file, '--json']).stdout);
-  assert.equal(check.baseline.knownCount, 2);
-  assert.equal(check.baseline.newCount, 1);
-});
+test(
+  "CLI: --migrate-baseline against a scan takes each finding's code, and accepts nothing new",
+  { skip: BASELINE_MOVES },
+  () => {
+    const page = leanPage(
+      'migrate-page',
+      '<!doctype html><html lang="en"><head><title>T</title></head><body><img src="x.png"><img src="m.png" alt="Map" usemap="#m"><map name="m"><area href="/a" alt="" shape="rect" coords="0,0,10,10"></map><img src="z.png"></body></html>'
+    );
+    const file = path.join(tmpDir, 'migrate-scan.json');
+    fs.writeFileSync(file, JSON.stringify(OLD_BASELINE));
+    const rules = ['--rules', 'img-alt-present,area-alt-present'];
+    const r = run(['scan', page, ...rules, '--migrate-baseline', file]);
+    assert.equal(r.status, 0, 'never fails the build');
+    assert.match(r.stdout, /img-alt-present/);
+    const migrated = JSON.parse(fs.readFileSync(file, 'utf8'));
+    assert.deepEqual(
+      migrated.entries.map((e) => e.reasonCode),
+      ['TEXT_ALTERNATIVE_MISSING', 'TEXT_ALTERNATIVE_EMPTY']
+    );
+    // The second image without alt is still new against it.
+    const check = JSON.parse(run(['scan', page, ...rules, '--baseline', file, '--json']).stdout);
+    assert.equal(check.baseline.knownCount, 2);
+    assert.equal(check.baseline.newCount, 1);
+  }
+);
 
 test('CLI: --migrate-baseline with --baseline or --write-baseline, or a missing file, exits 2', () => {
   const page = leanPage('migrate-usage');
@@ -1708,45 +1726,54 @@ test('CLI: --no-hooks without --browser exits 2: a static scan runs no page scri
   assert.match(stderr, /--no-hooks needs --browser/);
 });
 
-test('CLI: --migrate-baseline over several pages migrates each entry against its own page', () => {
-  const dir = path.join(tmpDir, 'migrate-pages');
-  fs.mkdirSync(dir);
-  const area = '<area href="/a" alt="" shape="rect" coords="0,0,10,10">';
-  fs.writeFileSync(
-    path.join(dir, 'a.html'),
-    `<!doctype html><html lang="en"><head><title>A</title></head><body><img src="m.png" alt="Map" usemap="#m"><map name="m">${area}</map></body></html>`
-  );
-  fs.writeFileSync(
-    path.join(dir, 'b.html'),
-    '<!doctype html><html lang="en"><head><title>B</title></head><body><img src="b.png" alt="B"></body></html>'
-  );
-  const entry = { ruleId: 'area-alt-present', reasonCode: 'DEFAULT', selector: 'area', html: area };
-  const file = path.join(dir, 'baseline.json');
-  fs.writeFileSync(
-    file,
-    JSON.stringify({
-      version: 1,
-      entries: [
-        { ...entry, page: 'a.html' },
-        { ...entry, page: 'b.html' }
+test(
+  'CLI: --migrate-baseline over several pages migrates each entry against its own page',
+  { skip: BASELINE_MOVES },
+  () => {
+    const dir = path.join(tmpDir, 'migrate-pages');
+    fs.mkdirSync(dir);
+    const area = '<area href="/a" alt="" shape="rect" coords="0,0,10,10">';
+    fs.writeFileSync(
+      path.join(dir, 'a.html'),
+      `<!doctype html><html lang="en"><head><title>A</title></head><body><img src="m.png" alt="Map" usemap="#m"><map name="m">${area}</map></body></html>`
+    );
+    fs.writeFileSync(
+      path.join(dir, 'b.html'),
+      '<!doctype html><html lang="en"><head><title>B</title></head><body><img src="b.png" alt="B"></body></html>'
+    );
+    const entry = {
+      ruleId: 'area-alt-present',
+      reasonCode: 'DEFAULT',
+      selector: 'area',
+      html: area
+    };
+    const file = path.join(dir, 'baseline.json');
+    fs.writeFileSync(
+      file,
+      JSON.stringify({
+        version: 1,
+        entries: [
+          { ...entry, page: 'a.html' },
+          { ...entry, page: 'b.html' }
+        ]
+      })
+    );
+    const r = run(
+      ['scan', 'a.html', 'b.html', '--rules', 'area-alt-present', '--migrate-baseline', file],
+      {
+        cwd: dir
+      }
+    );
+    assert.equal(r.status, 0);
+    assert.deepEqual(
+      JSON.parse(fs.readFileSync(file, 'utf8')).entries.map((e) => [e.page, e.reasonCode]),
+      [
+        ['a.html', 'TEXT_ALTERNATIVE_EMPTY'],
+        ['b.html', 'DEFAULT']
       ]
-    })
-  );
-  const r = run(
-    ['scan', 'a.html', 'b.html', '--rules', 'area-alt-present', '--migrate-baseline', file],
-    {
-      cwd: dir
-    }
-  );
-  assert.equal(r.status, 0);
-  assert.deepEqual(
-    JSON.parse(fs.readFileSync(file, 'utf8')).entries.map((e) => [e.page, e.reasonCode]),
-    [
-      ['a.html', 'TEXT_ALTERNATIVE_EMPTY'],
-      ['b.html', 'DEFAULT']
-    ]
-  );
-});
+    );
+  }
+);
 
 // Several --profile: a scan of several profiles at once (core 1.15). Skipped
 // with a core that scans one at a time, which the test after says so of.
