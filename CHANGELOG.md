@@ -2,9 +2,9 @@
 
 All notable changes to this package are documented here. This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## 1.6.0
 
-Requires `@surea11y/core` 1.16.0.
+Requires `@surea11y/core` 1.16.0 and `@surea11y/binding-base` 1.7.0.
 
 ### Changed
 

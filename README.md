@@ -25,7 +25,7 @@ $ surea11y scan ./index.html
 
 
 surea11y scan: file:///path/to/index.html
-  engine: @surea11y/core 1.15.0
+  engine: @surea11y/core 1.16.0
   pass: 16   fail: 4   cantTell: 4   notApplicable: 121
 
   occurrences by tier: fail: 4   cantTell: 4

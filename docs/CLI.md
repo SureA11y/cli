@@ -435,7 +435,7 @@ npx surea11y scan ./page.html --pack ./acme-policy-pack.js --profile acme-web-20
 
 ```
 surea11y scan: file:///path/to/page.html
-  engine: @surea11y/core 1.15.0
+  engine: @surea11y/core 1.16.0
   WCAG level reported: AA
   profile: acme-web-2026
   packs: @acme/a11y-policy@1.0.0
