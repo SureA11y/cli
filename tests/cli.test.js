@@ -303,6 +303,35 @@ test('CLI: --baseline pointing at a file with an unsupported/missing version exi
   assert.match(stderr, /not a supported baseline/);
 });
 
+test('CLI: --baseline with an entry that is not one exits 2 before scanning, naming the file and the entry', () => {
+  const file = path.join(tmpDir, 'baseline-badentry.html');
+  fs.writeFileSync(
+    file,
+    '<!doctype html><html lang="en"><head><title>T</title></head><body><img src="x.png"></body></html>'
+  );
+  const cases = [
+    [
+      { ruleId: 'img-alt-present', selector: 5 },
+      /baseline entry 0's selector is the number 5, not a string/
+    ],
+    [null, /baseline entry 0 is null/],
+    [{ reasonCode: 'MISSING_ALT' }, /baseline entry 0 has no ruleId/]
+  ];
+  for (const [entry, why] of cases) {
+    const baselinePath = path.join(tmpDir, 'baseline-badentry.json');
+    fs.writeFileSync(baselinePath, JSON.stringify({ version: 1, entries: [entry] }));
+    for (const mode of ['--baseline', '--migrate-baseline']) {
+      const { status, stdout, stderr } = run(['scan', file, mode, baselinePath]);
+      assert.equal(status, 2, `${mode} ${JSON.stringify(entry)}`);
+      assert.match(stderr, /Baseline file ".*baseline-badentry\.json" is not a valid baseline: /);
+      assert.match(stderr, why);
+      assert.match(stderr, /Fix the entry, or regenerate the file with --write-baseline\.\n$/);
+      assert.doesNotMatch(stderr, /matchBaseline:/);
+      assert.equal(stdout, '', 'nothing is scanned');
+    }
+  }
+});
+
 test('CLI: --baseline and --write-baseline together exits 2', () => {
   const file = path.join(tmpDir, 'baseline-combo.html');
   fs.writeFileSync(

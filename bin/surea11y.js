@@ -950,6 +950,28 @@ function loadBaselineFile(baselinePath) {
     );
   }
 
+  // Core 1.16.0 and later throw INVALID_BASELINE for an entry that isn't
+  // one (null, no ruleId, a selector that isn't a string), naming it. Ask
+  // now, against no findings, so the run stops before the scan and the
+  // message names the file; an older core reads every entry, as before.
+  try {
+    matchBaseline({ checksResults: [] }, parsed.entries);
+  } catch (err) {
+    if (err && err.code === 'INVALID_BASELINE') {
+      const why = formatError(err)
+        .replace(/^matchBaseline:\s*/, '')
+        .replace(/\.$/, '');
+      throw Object.assign(
+        new Error(
+          `Baseline file "${baselinePath}" is not a valid baseline: ${why}. Fix the entry, or regenerate the file with --write-baseline.`,
+          { cause: err }
+        ),
+        { causeIncluded: true }
+      );
+    }
+    throw err;
+  }
+
   return parsed;
 }
 

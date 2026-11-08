@@ -2,6 +2,18 @@
 
 All notable changes to this package are documented here. This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+Requires `@surea11y/core` 1.16.0.
+
+### Changed
+
+- Results follow core 1.16: under jsdom, an open `<dialog aria-modal="true">` is no longer taken as modal, as in a browser, so the page behind it is judged; the WCAG 2.0 and 2.1 profiles (`--profile wcag21-aa` and the others) run, and `--manual-checks` writes their version's worksheet; `--profile section508` warns that it is deprecated, for `wcag20-aa`; messages describe the check instead of naming its WCAG criterion. Baselines still match. See core's [`CHANGELOG.md`](https://github.com/SureA11y/core/blob/main/CHANGELOG.md).
+
+### Fixed
+
+- A `--baseline` or `--migrate-baseline` file with an entry that isn't one (`null`, no `ruleId`, a `selector` that isn't a string) exits `2` before the scan, naming the file and the entry: `Baseline file "a11y-baseline.json" is not a valid baseline: baseline entry 0 has no ruleId.` With core 1.16 it stopped after the scan with core's message, which didn't name the file.
+
 ## 1.5.0
 
 Requires `@surea11y/core` 1.15.0 and `@surea11y/binding-base` 1.7.0.
