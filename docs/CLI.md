@@ -435,11 +435,11 @@ npx surea11y scan ./page.html --pack ./acme-policy-pack.js --profile acme-web-20
 
 ```
 surea11y scan: file:///path/to/page.html
-  engine: @surea11y/core 1.16.0
+  engine: @surea11y/core 1.17.0
   WCAG level reported: AA
   profile: acme-web-2026
   packs: @acme/a11y-policy@1.0.0
-  pass: 9   fail: 2   cantTell: 5   notApplicable: 99
+  pass: 9   fail: 2   cantTell: 5   notApplicable: 100
 
   occurrences by tier: fail: 2   cantTell: 7
   needs review: likely fail: 0   likely pass: 0   needs a person: 7
@@ -460,7 +460,7 @@ cantTell — needs human review (5 rule(s)): manual-review, media-alternative-tr
 
 criteria (WCAG 2.2 AA):
   fail       1.1.1 Non-text content: text alternatives
-  cantTell   1.2.1 Audio-only and video-only (prerecorded): transcript; 1.2.2 Captions (Prerecorded); 1.3.1 Info and Relationships; 1.3.4 Orientation; 1.3.5 Identify Input Purpose; 1.4.1 Use of Color; 1.4.2 Audio Control; 1.4.3 Contrast: minimum; 1.4.4 Resize Text; 1.4.5 Images of Text; 1.4.12 Text Spacing; 2.1.1 Keyboard; 2.2.1 Timing Adjustable; 2.2.2 Pause, Stop, Hide; 2.4.1 Bypass Blocks; 2.4.2 Page titled; 2.4.3 Focus order; 2.4.6 Headings and Labels; 2.4.7 Focus visible; 2.5.8 Target size: minimum; 3.1.1 Language of page; 3.1.2 Language of Parts; 3.3.1 Error Identification; 3.3.2 Labels or Instructions; 3.3.8 Accessible Authentication (Minimum); 4.1.2 Name, role, value: accessible name; 4.1.2 Name, role, value: ARIA validity; 4.1.3 Status Messages
+  cantTell   1.2.1 Audio-only and video-only (prerecorded): transcript; 1.2.2 Captions (Prerecorded); 1.3.1 Info and Relationships; 1.3.4 Orientation; 1.3.5 Identify Input Purpose; 1.4.1 Use of Color; 1.4.2 Audio Control; 1.4.3 Contrast: minimum; 1.4.4 Resize Text; 1.4.5 Images of Text; 1.4.11 Non-text Contrast; 1.4.12 Text Spacing; 2.1.1 Keyboard; 2.2.1 Timing Adjustable; 2.2.2 Pause, Stop, Hide; 2.4.1 Bypass Blocks; 2.4.2 Page titled; 2.4.3 Focus order; 2.4.6 Headings and Labels; 2.4.7 Focus visible; 2.4.11 Focus Not Obscured (Minimum); 2.5.8 Target size: minimum; 3.1.1 Language of page; 3.1.2 Language of Parts; 3.3.1 Error Identification; 3.3.2 Labels or Instructions; 3.3.8 Accessible Authentication (Minimum); 4.1.2 Name, role, value: accessible name; 4.1.2 Name, role, value: ARIA validity; 4.1.3 Status Messages
   notApplicable: 3
   A criterion that passes here means the checks that ran found nothing in it, not that the page conforms.
 ```
