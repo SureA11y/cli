@@ -25,8 +25,8 @@ $ surea11y scan ./index.html
 
 
 surea11y scan: file:///path/to/index.html
-  engine: @surea11y/core 1.16.0
-  pass: 16   fail: 4   cantTell: 4   notApplicable: 121
+  engine: @surea11y/core 1.17.0
+  pass: 16   fail: 4   cantTell: 4   notApplicable: 125
 
   occurrences by tier: fail: 4   cantTell: 4
   needs review: likely fail: 1   likely pass: 0   needs a person: 3
@@ -63,7 +63,8 @@ FAIL (4 rule(s)):
 
 LIKELY FAIL — confirm (1 occurrence(s)):
   - heading-order (minor): html > body > main > h3
-    This heading jumps from level 1 to level 3, skipping a level.
+    This level-3 heading "Details" follows the level-1 heading "Welcome",
+    skipping a level.
     why: The heading skips a level after the one before it.
 
 cantTell — needs human review (4 rule(s)): heading-order, link-name-quality,
@@ -76,15 +77,18 @@ criteria (WCAG 2.2):
              Captions (Prerecorded); 1.3.1 Info and Relationships; 1.3.4
              Orientation; 1.3.5 Identify Input Purpose; 1.4.1 Use of Color;
              1.4.2 Audio Control; 1.4.4 Resize Text; 1.4.5 Images of Text;
-             1.4.12 Text Spacing; 2.1.1 Keyboard; 2.1.3 Keyboard (No Exception);
-             2.2.1 Timing Adjustable; 2.2.2 Pause, Stop, Hide; 2.2.4
-             Interruptions; 2.4.1 Bypass Blocks; 2.4.2 Page titled; 2.4.3 Focus
-             order; 2.4.4 Link Purpose (In Context); 2.4.6 Headings and Labels;
-             2.4.7 Focus visible; 2.4.9 Link Purpose (Link Only); 2.5.8 Target
-             size: minimum; 3.1.1 Language of page; 3.1.2 Language of Parts;
-             3.2.5 Change on Request; 3.3.1 Error Identification; 3.3.2 Labels
-             or Instructions; 3.3.8 Accessible Authentication (Minimum); 4.1.2
-             Name, role, value: ARIA validity; 4.1.3 Status Messages
+             1.4.11 Non-text Contrast; 1.4.12 Text Spacing; 2.1.1 Keyboard;
+             2.1.3 Keyboard (No Exception); 2.2.1 Timing Adjustable; 2.2.2
+             Pause, Stop, Hide; 2.2.4 Interruptions; 2.4.1 Bypass Blocks; 2.4.2
+             Page titled; 2.4.3 Focus order; 2.4.4 Link Purpose (In Context);
+             2.4.6 Headings and Labels; 2.4.7 Focus visible; 2.4.9 Link Purpose
+             (Link Only); 2.4.11 Focus Not Obscured (Minimum); 2.4.12 Focus Not
+             Obscured (Enhanced); 2.4.13 Focus Appearance; 2.5.5 Target Size
+             (Enhanced); 2.5.8 Target size: minimum; 3.1.1 Language of page;
+             3.1.2 Language of Parts; 3.2.5 Change on Request; 3.3.1 Error
+             Identification; 3.3.2 Labels or Instructions; 3.3.8 Accessible
+             Authentication (Minimum); 4.1.2 Name, role, value: ARIA validity;
+             4.1.3 Status Messages
   notApplicable: 2
   A criterion that passes here means the checks that ran found nothing in it,
   not that the page conforms.
