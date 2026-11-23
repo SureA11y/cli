@@ -2,6 +2,16 @@
 
 All notable changes to this package are documented here. This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 1.7.0
+
+Requires `@surea11y/core` 1.18.0 and `@surea11y/binding-base` 1.8.0.
+
+### Changed
+
+- Results follow core 1.17 and 1.18. New rules: with `--browser`, `focus-not-obscured-minimum` and `-enhanced` (2.4.11, 2.4.12), `reflow-horizontal-scroll` (1.4.10) and `resize-text-content-loss` (1.4.4) measure the layout and ask; without a browser they, and `target-size-enhanced` (2.5.5), are `notApplicable`, so a scan reports more rules not applicable and 1.4.10 among the criteria left to a person. `form-group-name-present` (1.3.1), `symbol-graphic-contrast` (1.4.11), `link-name-quality-link-only` (2.4.9) and `page-zones-landmark` ask. A few findings that failed now ask (a video with a poster and no name, a list item whose list's role replaces list), so a run that failed only on them exits `0`; `target-size-minimum` measures every interactive widget, which can fail one it passed over. Without a browser, contrast cases that need geometry are asked about instead of guessed. Messages name the root cause, and write decimals as `--locale`'s language does. See core's [`CHANGELOG.md`](https://github.com/SureA11y/core/blob/main/CHANGELOG.md).
+- A baseline written with core 1.17 still matches: core 1.18 splits two reason codes by cause (a `<marquee>` that stops only on hover, a placeholder left in a page title) and maps the old ones, and `--migrate-baseline` rewrites a baseline to the new codes. Some findings' SARIF fingerprints change (class names are split as HTML splits them, and a start tag cut by the snippet limit is put in order), so a SARIF upload may report those findings as new once.
+- A pack whose `core` range leaves out 1.18 (such as `~1.17.0`) doesn't run, and the scan exits `2`, naming it; widen its range to `^1.18.0`.
+
 ## 1.6.0
 
 Requires `@surea11y/core` 1.16.0 and `@surea11y/binding-base` 1.7.0.
