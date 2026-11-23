@@ -2048,3 +2048,111 @@ test('CLI: procedures take one --profile', () => {
   assert.equal(status, 2);
   assert.match(stderr, /procedures take one --profile/);
 });
+
+// --- core 1.18: --time-budget ---------------------------------------------------------
+
+const BUDGET_PAGE =
+  '<!doctype html><html lang="en"><head><title>T</title></head><body><main><h1>Hi</h1><img src="a.png"></main></body></html>';
+
+// A custom rule that spends 300 ms, and one after it that the budget leaves
+// unstarted: custom rules run after core's, in the order given.
+const SLOW_RULES = `module.exports = [{
+  id: 'org-slow',
+  runInPage(ctx) {
+    const end = Date.now() + 300;
+    while (Date.now() < end) {}
+    return { ruleId: ctx.rule.ruleId, outcome: 'pass', occurrences: [] };
+  }
+}, {
+  id: 'org-after',
+  runInPage(ctx) {
+    return { ruleId: ctx.rule.ruleId, outcome: 'pass', occurrences: [] };
+  }
+}];`;
+
+function budgetFiles(name) {
+  const page = path.join(tmpDir, `${name}.html`);
+  fs.writeFileSync(page, BUDGET_PAGE);
+  const rules = path.join(tmpDir, `${name}-rules.js`);
+  fs.writeFileSync(rules, SLOW_RULES);
+  return { page, rules };
+}
+
+test('CLI: a scan its --time-budget cut short exits 2, naming what did not run', () => {
+  const { page } = budgetFiles('budget-cut');
+  const { status, stderr } = run(['scan', page, '--time-budget', '1']);
+  assert.equal(status, 2);
+  assert.match(
+    stderr,
+    /Error: The scan ran out of its --time-budget of 1 ms: \d+ rule\(s\) did not run \(/
+  );
+  assert.match(stderr, /What did not run checked nothing/);
+});
+
+test('CLI: --time-budget passes with --wcag too, and a budget the scan stays within changes nothing', () => {
+  const { page } = budgetFiles('budget-wcag');
+  assert.equal(run(['scan', page, '--wcag', '2.2', '--time-budget', '1']).status, 2);
+  const within = run(['scan', page, '--time-budget', '60000', '--json']);
+  const without = run(['scan', page, '--json']);
+  assert.equal(within.status, without.status);
+  const result = JSON.parse(within.stdout);
+  assert.ok(!result.notRun && !result.engine.incomplete);
+});
+
+test('CLI: --allow-incomplete reports what did run, says the scan was cut short, and gates on its findings', () => {
+  const { page, rules } = budgetFiles('budget-allowed');
+  const sarif = path.join(tmpDir, 'budget-allowed.sarif');
+  const junit = path.join(tmpDir, 'budget-allowed.xml');
+  const args = [
+    'scan',
+    page,
+    '--custom-rules',
+    rules,
+    '--rules',
+    'org-slow,org-after,img-alt-present'
+  ];
+  const strict = run([...args, '--time-budget', '100']);
+  assert.equal(strict.status, 2);
+  assert.match(strict.stderr, /1 rule\(s\) did not run \(org-after\)/);
+
+  const { status, stdout, stderr } = run([
+    ...args,
+    '--time-budget',
+    '100',
+    '--allow-incomplete',
+    '--sarif',
+    sarif,
+    '--junit',
+    junit
+  ]);
+  assert.equal(status, 1, 'img-alt-present fails, and org-after did not run');
+  assert.match(
+    stderr,
+    /Warning: The scan ran out of its --time-budget of 100 ms: 1 rule\(s\) did not run \(org-after\)/
+  );
+  assert.match(stdout, /incomplete: 1 rule\(s\) not run, the --time-budget of 100 ms ran out/);
+  const run0 = JSON.parse(fs.readFileSync(sarif, 'utf8')).runs[0];
+  assert.equal(run0.invocations[0].executionSuccessful, false);
+  assert.match(fs.readFileSync(junit, 'utf8'), /<error/);
+});
+
+test('CLI: --allow-incomplete does not let a scan stand when no rule ran', () => {
+  const { page } = budgetFiles('budget-none');
+  const { status, stderr } = run(['scan', page, '--time-budget', '1', '--allow-incomplete']);
+  assert.equal(status, 2);
+  assert.match(stderr, /No rule ran, so the scan checked nothing\./);
+});
+
+test('CLI: --time-budget takes a whole number above 0, and --allow-incomplete alone says it changes nothing', () => {
+  const { page } = budgetFiles('budget-usage');
+  for (const value of ['0', 'abc', '1.5', '-3']) {
+    const { status, stderr } = run(['scan', page, '--time-budget', value]);
+    assert.equal(status, 2, value);
+    assert.match(stderr, /--time-budget must be a whole number above 0/);
+  }
+  const { stderr } = run(['scan', page, '--allow-incomplete']);
+  assert.match(
+    stderr,
+    /Warning: --allow-incomplete goes with --time-budget; it changes nothing here\./
+  );
+});

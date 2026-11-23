@@ -55,6 +55,8 @@ With `--browser`, it opens each page in headless Chromium instead, runs its scri
 | `--pack <name-or-path>` | Load a pack: rules, a standard or a checklist, and their profiles, from a package installed in the project or a local file. Repeatable. See [Packs](#packs) below. |
 | `--profile <name>` | Run a conformance profile, such as `en301549-v4.1.1` or a pack's own. A profile that isn't applied exits `2`. Repeat it to judge the page by several at once (`@surea11y/core` 1.15): see [Several profiles](#several-profiles). See [`ENGINE_OPTIONS.md`](https://github.com/SureA11y/core/blob/main/docs/ENGINE_OPTIONS.md#conformance-profiles). |
 | `--allow-profiles-not-run` | With several `--profile`, a profile that didn't run is a warning on stderr instead of exit `2`. |
+| `--time-budget <ms>` | Each page's scan starts no more rules once it has spent `<ms>` milliseconds (core 1.18); a scan cut short exits `2`, naming what didn't run. See [A time budget](#a-time-budget). |
+| `--allow-incomplete` | With `--time-budget`, a scan cut short is a warning on stderr instead of exit `2`, and the run reports and gates on what did run. |
 | `--write-baseline <path>` | Write every current `fail` occurrence to `<path>`, and with `--fail-on-lean` every likely failure too; never fails the build. See [`BASELINE.md`](https://github.com/SureA11y/core/blob/main/docs/BASELINE.md). |
 | `--baseline <path>` | Gate only on occurrences not already recorded in `<path>` (with `--fail-on-lean`, likely failures too). See [`BASELINE.md`](https://github.com/SureA11y/core/blob/main/docs/BASELINE.md). |
 | `--migrate-baseline <path>` | Rewrite the baseline at `<path>` under the reason codes core gives now, against the pages given, or, with none, only the moves that need no scan; never fails the build and accepts nothing new. See [Upgrading a baseline](#upgrading-a-baseline) below. |
@@ -135,7 +137,7 @@ The [known limitations](https://github.com/SureA11y/core/blob/main/docs/LIMITATI
 |---|---|
 | `0` | Scan completed, no `fail` outcomes on any page (none at or above `--fail-on-severity`'s level, when given), and with `--fail-on-lean` no likely failures. `--write-baseline` and `--migrate-baseline` exit `0` whatever the scan found. |
 | `1` | Scan completed, at least one `fail` outcome on some page (at or above `--fail-on-severity`'s level, when given), or with `--fail-on-lean` a likely failure — the CI-gating case. |
-| `2` | Usage error, or the scan itself couldn't run (bad path/URL, network failure, missing `jsdom`, `--browser` without Playwright or Chromium, a `--urls` file that can't be read or lists nothing, a `--sitemap` that can't be read, isn't a sitemap or lists nothing, `--max-pages` without `--sitemap`, a `--wait-for` element that never showed, a browser-only option without `--browser`, `--lean-fail-wcag-only` without `--fail-on-lean`, two of `--baseline`, `--write-baseline` and `--migrate-baseline` together, a baseline file that can't be read or holds an entry that isn't one, such as one with no `ruleId`), or it would have checked nothing or less than asked: a `--rules`/`--tags` list naming no known rule or tag, a selection whose parts cancel out so that no rule runs (`--rules img-alt-present --exclude-rules img-alt-present`), a `--context` selector that is invalid or matches no element, a custom rule the engine could not run, a pack that can't be found or loaded or that the engine skipped, or a `--profile` that wasn't applied (with several, one that didn't run, unless `--allow-profiles-not-run`). An option that takes a value given without one, and `--manual-checks` with a core older than 1.15.0, exit `2` before scanning. No report or baseline is written. |
+| `2` | Usage error, or the scan itself couldn't run (bad path/URL, network failure, missing `jsdom`, `--browser` without Playwright or Chromium, a `--urls` file that can't be read or lists nothing, a `--sitemap` that can't be read, isn't a sitemap or lists nothing, `--max-pages` without `--sitemap`, a `--wait-for` element that never showed, a browser-only option without `--browser`, `--lean-fail-wcag-only` without `--fail-on-lean`, two of `--baseline`, `--write-baseline` and `--migrate-baseline` together, a baseline file that can't be read or holds an entry that isn't one, such as one with no `ruleId`), or it would have checked nothing or less than asked: a `--rules`/`--tags` list naming no known rule or tag, a selection whose parts cancel out so that no rule runs (`--rules img-alt-present --exclude-rules img-alt-present`), a `--context` selector that is invalid or matches no element, a custom rule the engine could not run, a pack that can't be found or loaded or that the engine skipped, a `--profile` that wasn't applied (with several, one that didn't run, unless `--allow-profiles-not-run`), or a scan its `--time-budget` cut short (unless `--allow-incomplete`, and even then when no rule ran). An option that takes a value given without one, and `--manual-checks` with a core older than 1.15.0, exit `2` before scanning. No report or baseline is written. |
 
 `cantTell` outcomes don't affect the exit code — they're printed as a "needs human review" summary, consistent with the manual/`cantTell` mental model in [`TROUBLESHOOTING.md`](https://github.com/SureA11y/core/blob/main/docs/TROUBLESHOOTING.md#should-i-treat-canttell-as-a-failure) — unless `--fail-on-lean` is given, and then only those that likely fail count (see [Questions that likely fail](#questions-that-likely-fail)). For other `cantTell`-aware gating, use `--json` and inspect `checksResults` yourself, or call the library directly (see [`INTEGRATION.md`](https://github.com/SureA11y/core/blob/main/docs/INTEGRATION.md#ci-gating-a-build-on-the-result)).
 
@@ -640,6 +642,22 @@ surea11y scan ./dist/index.html --compact --json > result.json
 ```
 
 The summary, the exit code, the baseline and the HTML, SARIF and JUnit reports are the same as without it, and `--json` has `engine.outputDetail: 'findings'`. On a small page, `--json` goes from about 359 KB to 136 KB. See `engine.outputDetail` in [`OUTPUT_SCHEMA.md`](https://github.com/SureA11y/core/blob/main/docs/OUTPUT_SCHEMA.md).
+
+## A time budget
+
+A large page, or a CI step with a time limit, can bound each page's scan with `--time-budget <ms>`. Once a page's scan has spent that many milliseconds, it starts no more rules: a rule that has started finishes, and the rest are left out (core 1.18's `engineOptions.timeBudgetMs`). The budget counts the scan itself, not loading the page or `--wait-for`; with `--browser` it also counts fetching the style sheets the page can't read, which may take half of it. Each page, and each `--width` or `--color-scheme` scan, gets the whole budget.
+
+```sh
+npx @surea11y/cli scan https://example.com/ --browser --time-budget 20000
+```
+
+A scan cut short is never a clean one: the rules that didn't start checked nothing. So by default it exits `2`, writes no report, and names what didn't run:
+
+```
+Error: The scan ran out of its --time-budget of 20000 ms: 3 rule(s) did not run (target-size-minimum, text-spacing-content-loss, widget-keyboard-focusable). What did not run checked nothing; give it more time, or scan less (--rules, --tags, --context).
+```
+
+With `--allow-incomplete`, that is a warning on stderr instead, and the run goes on with what did run: the summary adds `incomplete: 3 rule(s) not run`, the exit code is `0` or `1` by the findings of the rules that ran, and the reports say the scan was incomplete (the HTML report says so at the top, SARIF marks the run as not successful with a notification per rule, and JUnit has an error per rule; `--json` has them in `notRun` and `engine.incomplete`). A scan in which no rule ran still exits `2`. A profile of several the budget left unstarted is part of the same message, and `--allow-incomplete` covers it too.
 
 ## In CI
 

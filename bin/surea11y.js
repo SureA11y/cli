@@ -91,6 +91,10 @@ Scan options:
                           repeat it to judge the page by several at once (core 1.15)
   --allow-profiles-not-run  With several --profile, warn about one that did not run
                           instead of failing
+  --time-budget <ms>      Stop starting rules once a page's scan has spent <ms> milliseconds
+                          (core 1.18); a scan cut short exits 2, naming what did not run
+  --allow-incomplete      With --time-budget, warn about a scan cut short instead of failing,
+                          and report what did run
   --write-baseline <path> Write every current "fail" occurrence to <path> (with --fail-on-lean, every
                           likely failure too); never fails the build
   --baseline <path>       Gate only on occurrences not already recorded in <path>
@@ -249,6 +253,12 @@ function parseArgs(argv) {
       case '--allow-profiles-not-run':
         out.allowProfilesNotRun = true;
         break;
+      case '--time-budget':
+        out.timeBudget = valueAfter(argv, ++i, a);
+        break;
+      case '--allow-incomplete':
+        out.allowIncomplete = true;
+        break;
       case '--baseline':
         out.baseline = valueAfter(argv, ++i, a);
         break;
@@ -397,6 +407,9 @@ function buildEngineOptions(args, customRules, packs) {
   else if (args.profile) engineOptions.profile = args.profile;
   if (packs && packs.length) engineOptions.packs = packs;
   if (args.locale) engineOptions.locale = args.locale;
+  // --time-budget: each page's scan starts no more rules once it has spent
+  // that long (core 1.18), and says what it did not run.
+  if (args.timeBudget) engineOptions.timeBudgetMs = args.timeBudget;
   if (args.compact) engineOptions.output = { detail: 'findings' };
   if (customRules && customRules.length) engineOptions.customRules = customRules;
   // A --wcag target carries its own level; without one, --wcag-level gives
@@ -541,7 +554,13 @@ function findScanProblem(result, args) {
     return `--context "${args.context}" matched no element, so nothing was scanned. Check the selector against the page.`;
   }
 
-  if (result && Array.isArray(result.checksResults) && result.checksResults.length === 0) {
+  const rulesNotRun = Array.isArray(result && result.notRun) ? result.notRun : [];
+  if (
+    result &&
+    Array.isArray(result.checksResults) &&
+    result.checksResults.length === 0 &&
+    !rulesNotRun.length
+  ) {
     const hint =
       args.rules && args.tags && args.includeMode !== 'or'
         ? ' (--include-mode or runs the rules that match either)'
@@ -559,7 +578,11 @@ function findScanProblem(result, args) {
 
   // A scan of several profiles: those it was asked for and didn't run.
   if (args.profiles && args.profiles.length > 1) {
-    const notRun = (result && result.engine && result.engine.profilesNotRun) || [];
+    // A profile the time budget left unstarted is the scan cut short's,
+    // reported below with what else did not run.
+    const notRun = ((result && result.engine && result.engine.profilesNotRun) || []).filter(
+      (p) => !(p && p.reason === 'timeBudget')
+    );
     const ran = (result && result.engine && result.engine.profiles) || null;
     if (!ran) {
       return `${args.profiles.length} --profile given, but this @surea11y/core scans one profile at a time (several need 1.15 or later). Nothing was scanned against them.`;
@@ -613,7 +636,50 @@ function findScanProblem(result, args) {
     return `${skipped.length} custom rule(s) from --custom-rules did not run:\n${lines.join('\n')}\nSee docs/CLI.md#custom-rules.`;
   }
 
+  // A scan its --time-budget cut short (core 1.18): the rules it didn't
+  // start checked nothing. --allow-incomplete makes it a warning, and the
+  // reports say the scan was incomplete.
+  const incomplete = describeIncompleteScan(result, args);
+  if (incomplete) {
+    if (!args.allowIncomplete) return incomplete;
+    // None ran: the scan checked nothing, and passing it would read as a
+    // clean page. --allow-incomplete lets some rules not run, not all.
+    if (!(Array.isArray(result.checksResults) && result.checksResults.length)) {
+      return `${incomplete} No rule ran, so the scan checked nothing.`;
+    }
+    process.stderr.write(`Warning: ${incomplete}\n`);
+  }
+
   return null;
+}
+
+// What a scan its --time-budget cut short left out, as one message, or null
+// for a scan that ran in full.
+function describeIncompleteScan(result, args) {
+  const engine = (result && result.engine) || {};
+  const incomplete =
+    engine.incomplete && typeof engine.incomplete === 'object' ? engine.incomplete : null;
+  const notRun = Array.isArray(result && result.notRun) ? result.notRun : [];
+  if (!incomplete && !notRun.length) return null;
+  const rules = [...new Set(notRun.map((e) => e && e.ruleId).filter(Boolean))];
+  const profiles = (Array.isArray(engine.profilesNotRun) ? engine.profilesNotRun : [])
+    .filter((p) => p && p.reason === 'timeBudget')
+    .map((p) => p.profile);
+  const sheets =
+    incomplete && Array.isArray(incomplete.styleSheetsNotRead) ? incomplete.styleSheetsNotRead : [];
+  const budget = (incomplete && incomplete.timeBudgetMs) || args.timeBudget;
+  const named = (list) =>
+    list.slice(0, 5).join(', ') + (list.length > 5 ? ` and ${list.length - 5} more` : '');
+  const parts = [];
+  if (rules.length) parts.push(`${rules.length} rule(s) did not run (${named(rules)})`);
+  if (profiles.length)
+    parts.push(`--profile ${profiles.map((p) => `"${p}"`).join(', ')} did not start`);
+  if (sheets.length) parts.push(`${sheets.length} style sheet(s) were not read (${named(sheets)})`);
+  return (
+    `The scan ran out of its --time-budget${budget ? ` of ${budget} ms` : ''}` +
+    (parts.length ? `: ${parts.join('; ')}` : '') +
+    '. What did not run checked nothing; give it more time, or scan less (--rules, --tags, --context).'
+  );
 }
 
 // The WCAG criterion a rollup decides, from its normative mapping, or null
@@ -783,8 +849,21 @@ function printSummary(
     process.stdout.write(`  packs: ${result.engine.packs.join(', ')}\n`);
   }
   process.stdout.write(
-    `  pass: ${byOutcome.pass}   fail: ${byOutcome.fail}   cantTell: ${byOutcome.cantTell}   notApplicable: ${byOutcome.notApplicable}\n\n`
+    `  pass: ${byOutcome.pass}   fail: ${byOutcome.fail}   cantTell: ${byOutcome.cantTell}   notApplicable: ${byOutcome.notApplicable}\n`
   );
+  // A scan its --time-budget cut short (with --allow-incomplete): the rules
+  // it didn't start are in none of the counts above.
+  const notRunIds = new Set(
+    (Array.isArray(result.notRun) ? result.notRun : []).map((e) => e && e.ruleId).filter(Boolean)
+  );
+  if (notRunIds.size || (result.engine && result.engine.incomplete)) {
+    const budget =
+      result.engine && result.engine.incomplete && result.engine.incomplete.timeBudgetMs;
+    process.stdout.write(
+      `  incomplete: ${notRunIds.size} rule(s) not run, the --time-budget${budget ? ` of ${budget} ms` : ''} ran out\n`
+    );
+  }
+  process.stdout.write('\n');
   const leanFails = [];
   const reviewCounts = { leanFail: 0, leanPass: 0, open: 0 };
   for (const r of result.checksResults) {
@@ -2063,7 +2142,15 @@ async function runScan(args) {
     }
     args.width = [...new Set(widths.map(Number))];
   }
-  for (const [flag, key, min] of [['--wait-timeout', 'waitTimeout', 1]]) {
+  if (args.allowIncomplete && args.timeBudget === undefined) {
+    process.stderr.write(
+      'Warning: --allow-incomplete goes with --time-budget; it changes nothing here.\n'
+    );
+  }
+  for (const [flag, key, min] of [
+    ['--wait-timeout', 'waitTimeout', 1],
+    ['--time-budget', 'timeBudget', 1]
+  ]) {
     if (args[key] === undefined) continue;
     const n = Number(args[key]);
     if (!/^\d+$/.test(String(args[key])) || n < min) {
