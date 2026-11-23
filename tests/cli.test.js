@@ -2054,12 +2054,13 @@ test('CLI: procedures take one --profile', () => {
 const BUDGET_PAGE =
   '<!doctype html><html lang="en"><head><title>T</title></head><body><main><h1>Hi</h1><img src="a.png"></main></body></html>';
 
-// A custom rule that spends 300 ms, and one after it that the budget leaves
-// unstarted: custom rules run after core's, in the order given.
+// A custom rule that spends 3 seconds, and one after it that the budget
+// leaves unstarted: custom rules run after core's, in the order given. The
+// budget below (1.5 s) leaves a slow CI runner ample time to reach the first.
 const SLOW_RULES = `module.exports = [{
   id: 'org-slow',
   runInPage(ctx) {
-    const end = Date.now() + 300;
+    const end = Date.now() + 3000;
     while (Date.now() < end) {}
     return { ruleId: ctx.rule.ruleId, outcome: 'pass', occurrences: [] };
   }
@@ -2111,14 +2112,14 @@ test('CLI: --allow-incomplete reports what did run, says the scan was cut short,
     '--rules',
     'org-slow,org-after,img-alt-present'
   ];
-  const strict = run([...args, '--time-budget', '100']);
+  const strict = run([...args, '--time-budget', '1500']);
   assert.equal(strict.status, 2);
   assert.match(strict.stderr, /1 rule\(s\) did not run \(org-after\)/);
 
   const { status, stdout, stderr } = run([
     ...args,
     '--time-budget',
-    '100',
+    '1500',
     '--allow-incomplete',
     '--sarif',
     sarif,
@@ -2128,9 +2129,9 @@ test('CLI: --allow-incomplete reports what did run, says the scan was cut short,
   assert.equal(status, 1, 'img-alt-present fails, and org-after did not run');
   assert.match(
     stderr,
-    /Warning: The scan ran out of its --time-budget of 100 ms: 1 rule\(s\) did not run \(org-after\)/
+    /Warning: The scan ran out of its --time-budget of 1500 ms: 1 rule\(s\) did not run \(org-after\)/
   );
-  assert.match(stdout, /incomplete: 1 rule\(s\) not run, the --time-budget of 100 ms ran out/);
+  assert.match(stdout, /incomplete: 1 rule\(s\) not run, the --time-budget of 1500 ms ran out/);
   const run0 = JSON.parse(fs.readFileSync(sarif, 'utf8')).runs[0];
   assert.equal(run0.invocations[0].executionSuccessful, false);
   assert.match(fs.readFileSync(junit, 'utf8'), /<error/);
